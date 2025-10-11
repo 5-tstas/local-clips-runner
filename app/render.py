@@ -64,6 +64,46 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
         page = await context.new_page()
         await page.goto(url)
 
+        # Проставим фон и цвета до первого кадра (убирает «серый» старт)
+await page.evaluate("""
+(() => {
+  const S = window.STATE || {};
+  if (S.bgColor) document.body.style.background = S.bgColor;
+  if (S.textColor) document.body.style.color = S.textColor;
+})();
+""")
+
+# Явно запустим анимацию в зависимости от типа
+launchers = {
+    "overlay": ["preview", "runPreview", "start", "play"],
+    "chat":    ["runPreview", "preview", "start", "play"],
+    "abc":     ["preview", "start", "play"]
+}
+fns = launchers.get(job.type, ["preview","runPreview","start","play"])
+await page.evaluate(
+    """
+    (names) => {
+      const S = window.STATE || {};
+      for (const name of names) {
+        const fn = (window as any)[name];
+        if (typeof fn === 'function') {
+          try { fn(S); return true; } catch(_) {}
+          try { fn(); return true; } catch(_) {}
+        }
+      }
+      // Пытаемся кликнуть типичные кнопки предпросмотра
+      const sels = ['#btnPreview','#preview','[data-action="preview"]','.preview','button'];
+      for (const sel of sels) {
+        const el = document.querySelector(sel);
+        if (el) { (el as HTMLElement).click(); return true; }
+      }
+      return false;
+    }
+    """,
+    fns
+)
+
+
         # дождёмся шрифтов (если есть) — не критично
         try:
             await page.wait_for_function(
