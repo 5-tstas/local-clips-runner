@@ -1,7 +1,7 @@
 # app/main.py
 import threading, time, webbrowser
 import uvicorn
-from .server import app  # noqa
+from server import app  # локальный импорт из той же папки
 
 PORT = 7080
 URL = f"http://127.0.0.1:{PORT}/"
