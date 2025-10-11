@@ -342,6 +342,31 @@ render(cfg(), buildState(cfg()));
   setTimeout(autoStart, 120);
 })();
 </script>
+<script>
+/* Автозапуск с данными из STATE — без кликов руками */
+(function startWithState(S){
+  S = S || (window.STATE || {});
+  const set = (sel, val) => {
+    const el = document.querySelector(sel);
+    if (!el || val == null) return;
+    el.value = Array.isArray(val) ? val.join('\n') : String(val);
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+  };
+  // Подставляем тексты (поправьте селекторы под ваши поля, если другие)
+  set('#title',    S.title);
+  set('#subtitle', S.subtitle);
+  set('#body',     S.body);
+
+  // Цвета — чтобы не было серого первого кадра
+  if (S.bgColor)  document.body.style.background = S.bgColor;
+  if (S.textColor)document.body.style.color      = S.textColor;
+
+  // Старт предпросмотра (подцепите свой id, если другой)
+  const btn = document.querySelector('#btnPreview') || document.querySelector('#preview');
+  if (btn) btn.click();
+})(window.STATE);
+</script>
 
 </body>
 </html>

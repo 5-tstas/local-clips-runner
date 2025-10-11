@@ -1,0 +1,30 @@
+{
+  "outputDir": "out",
+  "jobs": [
+    {
+      "type": "overlay",
+      "html": "overlay_maker-v4.html",
+      "name": "001_overlay_demo",
+      "payload": {
+        "text": {
+          "title": "GPT-новости недели",
+          "subtitle": "Что нового и полезного",
+          "body": ["• Sora / Veo апдейты", "• Бесплатные тулзы", "• Лайфхаки монтажа"]
+        },
+        "style": { "panelColor": "#c9c9c9", "panelAlpha": 0.92, "align": "center", "fps": 30 }
+      }
+    },
+    {
+      "type": "chat",
+      "html": "chat-typing-v5.3.html",
+      "name": "002_chat_demo",
+      "payload": {
+        "text": {
+          "prompt": "Подключаю Pulse к проекту…",
+          "lines": ["# Итоги", "— Быстрее, дешевле", "— Рендер локально", "— WEBM без конверта"]
+        },
+        "style": { "fps": 30, "cpsPrompt": 14, "cpsAnswer": 20, "thinkSec": 2 }
+      }
+    }
+  ]
+}
