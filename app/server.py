@@ -2,11 +2,15 @@
 from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
+import json
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from render import run_batch
+from models import Batch
+from render import render_batch
+
 
 APP_DIR = Path(__file__).resolve().parent
 UI_DIR = APP_DIR / "ui"
@@ -33,13 +37,18 @@ async def render(json_file: UploadFile = File(...)):
     out_dir = OUT_ROOT / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    tmp_json = out_dir / "batch.json"
-    tmp_json.write_bytes(await json_file.read())
+    content = await json_file.read()
+    try:
+        data = json.loads(content.decode("utf-8"))
+        batch = Batch(**data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Некорректный JSON: {e}")
+
+    (out_dir / "batch.json").write_bytes(content)
 
     try:
-        zip_path = run_batch(tmp_json, out_dir)
+        zip_path = await render_batch(batch, out_dir)   # ← ВАЖНО: await render_batch
     except Exception as e:
-        # вернём понятную ошибку на страницу
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
     return FileResponse(

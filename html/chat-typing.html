@@ -502,6 +502,25 @@ render(buildState(getCfg()), getCfg());
   if (window.initABC) window.initABC(STATE);
 })();
 </script>
+<script>
+/* Автостарт предпросмотра/анимации после загрузки страницы */
+(function autoStart() {
+  const startFns = ['preview','runPreview','start','startPreview','play'];
+  for (const fn of startFns) {
+    if (typeof window[fn] === 'function') {
+      try { window[fn](window.STATE); return; } catch(e) {}
+    }
+  }
+  // запасной вариант — клик по типовым кнопкам «Предпросмотр»
+  const selectors = ['#btnPreview', '#preview', '[data-action="preview"]', '.preview'];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el) { el.click(); return; }
+  }
+  // если ничего не найдено, повторим попытку чуть позже (DOM может не успеть)
+  setTimeout(autoStart, 120);
+})();
+</script>
 
 </body>
 </html>
