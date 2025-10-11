@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Overlay Maker — full panel, vertical text centering</title>
+<style>
+  :root{--w:1280px;--h:720px;--ui:#0f141b;--line:#1e2a36;--bg:#0b0f13;--accent:#3aa3ff}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:#e8edf2;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+       display:flex;flex-direction:column;align-items:center;gap:16px;padding:16px}
+  .wrap{max-width:1280px;width:100%;display:flex;flex-direction:column;gap:12px}
+  .panel{background:var(--ui);border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:10px}
+  .g3{grid-template-columns:repeat(3,minmax(0,1fr));display:grid;gap:10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  label{font-size:13px;color:#c9d6e2}
+  input[type="text"],input[type="number"],select,textarea{width:100%;background:#0b0f13;color:#e8edf2;border:1px solid var(--line);
+     border-radius:8px;padding:8px;font-size:14px}
+  input[type="color"]{block-size:36px;inline-size:48px;border:1px solid var(--line);border-radius:8px;background:#000;padding:0}
+  textarea{min-height:88px}
+  .check{display:inline-flex;gap:6px;align-items:center;margin-right:12px}
+  button{background:var(--accent);color:#001222;border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.6;cursor:not-allowed}
+  .hint{color:#9aa7b4;font-size:12px}
+  .stage{width:var(--w);height:var(--h);background:#000;border-radius:12px;box-shadow:0 0 0 1px var(--line),0 12px 40px rgba(0,0,0,.5);overflow:hidden}
+  canvas{display:block;width:100%;height:100%}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Экран / глобальные -->
+  <div class="panel">
+    <div class="g3">
+      <label>Фон сцены (под плашкой)<br><input id="sceneBg" type="color" value="#000000"></label>
+      <label>Выравнивание по горизонтали<br>
+        <select id="align">
+          <option value="center" selected>по центру</option>
+          <option value="left">по левому краю</option>
+          <option value="right">по правому краю</option>
+        </select>
+      </label>
+      <label>FPS<br><input id="fps" type="number" value="30" min="15" max="60"></label>
+    </div>
+
+    <div class="g3">
+      <label>Пауза после . ! ? … (мс)<br><input id="pauseSentence" type="number" value="220" min="0" max="1500"></label>
+      <label>Пауза после , ; : (мс)<br><input id="pauseComma" type="number" value="110" min="0" max="1000"></label>
+      <label>Задержка после печати (сек)<br>
+        <select id="holdSec">
+          <option>0</option><option>3</option><option selected>5</option><option>10</option><option>15</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="g3">
+      <label>Scale текста (%) — для монтажа (обычно 75–90)<br><input id="scalePct" type="number" value="85" min="50" max="120"></label>
+      <label>Цвет плашки (во весь экран)<br><input id="panelColor" type="color" value="#c9c9c9"></label>
+      <label>Непрозрачность плашки<br><input id="panelAlpha" type="number" value="0.92" step="0.01" min="0" max="1"></label>
+    </div>
+
+    <div class="g3">
+      <label>Внутренний отступ текста (px)<br><input id="textPad" type="number" value="36" min="8" max="160"></label>
+      <label>Макс. ширина текста (% кадра)<br><input id="maxW" type="number" value="70" min="40" max="95"></label>
+      <div class="row" style="align-items:end"><button id="previewBtn">▶︎ Предпросмотр</button><button id="exportBtn">● Экспорт WebM</button></div>
+    </div>
+    <div class="hint">Плашка всегда 1280×720. Центрируется только текст (вертикально всегда; горизонтально — по настройке).</div>
+  </div>
+
+  <!-- Заголовок -->
+  <div class="panel">
+    <label>Заголовок<br><input id="title" type="text" placeholder="Например: GPT-новости недели — прорывы и лайфхаки"></label>
+    <div class="row">
+      <label>Шрифт<br><input id="fontH1" type="text" value="System UI, -apple-system, Segoe UI, Roboto, Arial"></label>
+      <label>Размер (px)<br><input id="fsH1" type="number" value="64" min="18" max="160"></label>
+      <label>Цвет<br><input id="colH1" type="color" value="#000000"></label>
+      <label>Скорость (симв/с)<br><input id="cpsH1" type="number" value="18" min="4" max="120"></label>
+    </div>
+    <div class="row">
+      <span class="check"><input id="bH1" type="checkbox" checked> <span>Жирный</span></span>
+      <span class="check"><input id="iH1" type="checkbox"> <span>Курсив</span></span>
+      <span class="check"><input id="uH1" type="checkbox"> <span>Подчёркнутый</span></span>
+    </div>
+  </div>
+
+  <!-- Подзаголовок -->
+  <div class="panel">
+    <label>Подзаголовок<br><input id="subtitle" type="text" placeholder="Например: Что нового в Sora, Veo и бесплатных инструментах"></label>
+    <div class="row">
+      <label>Шрифт<br><input id="fontH2" type="text" value="Roboto, System UI, -apple-system, Segoe UI, Arial"></label>
+      <label>Размер (px)<br><input id="fsH2" type="number" value="42" min="14" max="120"></label>
+      <label>Цвет<br><input id="colH2" type="color" value="#000000"></label>
+      <label>Скорость (симв/с)<br><input id="cpsH2" type="number" value="16" min="4" max="120"></label>
+    </div>
+    <div class="row">
+      <span class="check"><input id="bH2" type="checkbox"> <span>Жирный</span></span>
+      <span class="check"><input id="iH2" type="checkbox"> <span>Курсив</span></span>
+      <span class="check"><input id="uH2" type="checkbox"> <span>Подчёркнутый</span></span>
+    </div>
+  </div>
+
+  <!-- Основной текст -->
+  <div class="panel">
+    <label>Текст (можно пусто)<br><textarea id="body" placeholder="Короткий абзац или список — печать побуквенно."></textarea></label>
+    <div class="row">
+      <label>Шрифт<br><input id="fontP" type="text" value="System UI, -apple-system, Segoe UI, Roboto, Arial"></label>
+      <label>Размер (px)<br><input id="fsP" type="number" value="28" min="12" max="80"></label>
+      <label>Цвет<br><input id="colP" type="color" value="#000000"></label>
+      <label>Скорость (симв/с)<br><input id="cpsP" type="number" value="14" min="4" max="120"></label>
+    </div>
+    <div class="row">
+      <span class="check"><input id="bP" type="checkbox"> <span>Жирный</span></span>
+      <span class="check"><input id="iP" type="checkbox"> <span>Курсив</span></span>
+      <span class="check"><input id="uP" type="checkbox"> <span>Подчёркнутый</span></span>
+    </div>
+  </div>
+
+  <div class="hint" id="status">Готово</div>
+  <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
+</div>
+
+<script>
+const W=1280,H=720, ctx=document.getElementById('cv').getContext('2d',{alpha:false});
+const $=id=>document.getElementById(id); const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* — Утилиты — */
+function fontCSS({b,i,fs,font}){ let f=''; if(i) f+='italic '; if(b) f+='800 '; f+=fs+'px '+font; return f; }
+function drawUnderline(x,y,w,col,th=2){ ctx.save(); ctx.fillStyle=col; ctx.fillRect(x, y+4, w, th); ctx.restore(); }
+function measure(text,font){ ctx.save(); ctx.font=font; const w=ctx.measureText(text).width; ctx.restore(); return w; }
+function wrap(text,font,maxW){ ctx.save(); ctx.font=font; const words=(text||'').split(/\s+/); const lines=[]; let cur='';
+  for(const w of words){ const t=cur?cur+' '+w:w; if(ctx.measureText(t).width<=maxW) cur=t; else{ if(cur) lines.push(cur); cur=w; } }
+  if(cur) lines.push(cur); ctx.restore(); return lines; }
+function cpsIv(text,cps){ const base=1000/Math.max(1,cps); return Array.from(text||'', _=>base); }
+
+/* — Конфиг/состояние — */
+function cfg(){
+  return {
+    sceneBg: $('sceneBg').value,
+    align: $('align').value,
+    fps: +$('fps').value||30,
+    pauseS: +$('pauseSentence').value, pauseC:+$('pauseComma').value,
+    holdSec:+$('holdSec').value,
+    scale: Math.max(.5, Math.min(1.2, +$('scalePct').value/100)), // масштаб ТОЛЬКО текста
+    panelCol: $('panelColor').value, panelA:+$('panelAlpha').value,
+    textPad: +$('textPad').value, maxWCoef:+$('maxW').value/100,
+    H1:{text:$('title').value,  font:$('fontH1').value,fs:+$('fsH1').value,col:$('colH1').value,b:$('bH1').checked,i:$('iH1').checked,u:$('uH1').checked,cps:+$('cpsH1').value},
+    H2:{text:$('subtitle').value,font:$('fontH2').value,fs:+$('fsH2').value,col:$('colH2').value,b:$('bH2').checked,i:$('iH2').checked,u:$('uH2').checked,cps:+$('cpsH2').value},
+    P :{text:$('body').value,    font:$('fontP').value ,fs:+$('fsP').value ,col:$('colP').value ,b:$('bP').checked ,i:$('iP').checked ,u:$('uP').checked ,cps:+$('cpsP').value}
+  };
+}
+function buildState(c){
+  return {
+    phase:'typing', holdLeft:c.holdSec*1000,
+    H1:{idx:0,left:0,iv:cpsIv(c.H1.text,c.H1.cps)},
+    H2:{idx:0,left:0,iv:cpsIv(c.H2.text,c.H2.cps)},
+    P :{idx:0,left:0,iv:cpsIv(c.P.text ,c.P.cps )}
+  };
+}
+
+/* — Лейаут с вертикальным центрированием текста. Плашка — fullscreen — */
+function layout(c,st){
+  // уже напечатанные фрагменты
+  const t1=c.H1.text.slice(0,st.H1.idx), t2=c.H2.text.slice(0,st.H2.idx), t3=c.P.text.slice(0,st.P.idx);
+
+  // МАСШТАБ: текст рисуем в системе координат до скейла; чтобы
+  // max ширина после скейла осталась равной % от кадра, делим на scale.
+  const maxWpre = (W*c.maxWCoef)/c.scale;
+  const pad = c.textPad / c.scale;
+
+  const font1=fontCSS({b:c.H1.b,i:c.H1.i,fs:c.H1.fs,font:c.H1.font});
+  const font2=fontCSS({b:c.H2.b,i:c.H2.i,fs:c.H2.fs,font:c.H2.font});
+  const font3=fontCSS({b:c.P.b ,i:c.P.i ,fs:c.P.fs ,font:c.P.font });
+
+  const lh1=Math.round(c.H1.fs*1.15), lh2=Math.round(c.H2.fs*1.2), lh3=Math.round(c.P.fs*1.35);
+  const gap12=10, gap23=8;
+
+  const L1= wrap(t1,font1, maxWpre-2*pad);
+  const L2= wrap(t2,font2, maxWpre-2*pad);
+  const L3= wrap(t3,font3, maxWpre-2*pad);
+
+  let contentH = pad + (L1.length?L1.length*lh1:0) + (L1.length&&L2.length?gap12:0)
+                + (L2.length?L2.length*lh2:0) + ((L1.length||L2.length)&&L3.length?gap23:0)
+                + (L3.length?L3.length*lh3:0) + pad;
+
+  // вертикальный центр текста (в до-скейловых координатах!)
+  const startY = (H/c.scale - contentH)/2;
+
+  // горизонталь
+  const centerX = W/(2*c.scale);
+  let xLeft = centerX - (maxWpre/2);
+  let xRight= centerX + (maxWpre/2);
+  let xText;
+  if(c.align==='center') xText=centerX;
+  else if(c.align==='left') xText=xLeft+pad;
+  else xText=xRight-pad;
+
+  return {L1,L2,L3,font1,font2,font3,lh1,lh2,lh3,
+          startY, xText, centerX, maxWpre, pad};
+}
+
+/* — Отрисовка — */
+function drawLines(lines, x, yStart, lh, font, col, align, underline=false){
+  ctx.font=font; ctx.fillStyle=col; ctx.textBaseline='alphabetic'; ctx.textAlign=align;
+  let y=yStart;
+  for(const line of lines){
+    const by = y + lh*0.8;
+    ctx.fillText(line, x, by);
+    if(underline){
+      const w=measure(line,font);
+      const ux = (align==='center')? x - w/2 : (align==='right'? x - w : x);
+      drawUnderline(ux, by, w, col, Math.max(2, Math.round(parseInt(font)*0.06)));
+    }
+    y+=lh;
+  }
+}
+function render(c,st){
+  // фон сцены
+  ctx.fillStyle=c.sceneBg; ctx.fillRect(0,0,W,H);
+  // плашка — ВСЕГДА на весь экран
+  ctx.save(); ctx.globalAlpha=c.panelA; ctx.fillStyle=c.panelCol; ctx.fillRect(0,0,W,H); ctx.restore();
+
+  // текст — масштаб и центрирование (масштаб только для текста)
+  ctx.save();
+  ctx.translate(W/2, H/2); ctx.scale(c.scale, c.scale); ctx.translate(-W/2, -H/2);
+
+  const L=layout(c,st);
+
+  let y=L.startY + L.pad;
+  if(L.L1.length){
+    drawLines(L.L1, (c.align==='center'?L.centerX:L.xText), y, L.lh1, L.font1, c.H1.col, c.align, c.H1.u);
+    y += L.lh1*L.L1.length + (L.L2.length?10:0);
+  }
+  if(L.L2.length){
+    drawLines(L.L2, (c.align==='center'?L.centerX:L.xText), y, L.lh2, L.font2, c.H2.col, c.align, c.H2.u);
+    y += L.lh2*L.L2.length + (L.L3.length?8:0);
+  }
+  if(L.L3.length){
+    drawLines(L.L3, (c.align==='center'?L.centerX:L.xText), y, L.lh3, L.font3, c.P.col, c.align, c.P.u);
+  }
+
+  ctx.restore();
+}
+
+/* — Печать — */
+function step(st,c,dt){
+  const SENT=/[.!?…]/, COMM=/[,;:]/;
+  const advance=(key,text,iv)=>{
+    const b=st[key];
+    if(b.idx < iv.length){
+      b.left -= dt;
+      while(b.left<=0 && b.idx<iv.length){
+        const ch=text[b.idx];
+        b.left += iv[b.idx]; b.idx++;
+        if(SENT.test(ch)) b.left += c.pauseS;
+        else if(COMM.test(ch)) b.left += c.pauseC;
+      }
+      return true;
+    }
+    return false;
+  };
+  if(st.phase==='typing'){
+    if(advance('H1', c.H1.text, st.H1.iv)) return;
+    if(advance('H2', c.H2.text, st.H2.iv)) return;
+    if(advance('P' , c.P.text , st.P.iv )) return;
+    st.phase='hold';
+  }else if(st.phase==='hold'){
+    st.holdLeft -= dt; if(st.holdLeft<=0) st.phase='done';
+  }
+}
+
+/* — Предпросмотр / Экспорт — */
+let running=false;
+async function preview(){
+  if(running) return; running=true; $('status').textContent='Предпросмотр…';
+  const c=cfg(); const st=buildState(c); let last=performance.now();
+  function frame(now){
+    if(!running) return; const dt=now-last; last=now; step(st,c,dt); render(c,st);
+    if(st.phase!=='done') requestAnimationFrame(frame);
+    else { running=false; $('status').textContent='Готово'; }
+  }
+  requestAnimationFrame(ts=>{ last=ts; frame(ts); });
+}
+async function exportWebM(){
+  if(running) return; running=true; $('exportBtn').disabled=true; $('status').textContent='Экспорт…';
+  try{
+    const c=cfg(); const st=buildState(c);
+    const stream=document.getElementById('cv').captureStream(c.fps);
+    const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':
+               (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')?'video/webm;codecs=vp8':'video/webm');
+    const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
+    const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+    const done=new Promise(res=>rec.onstop=res); rec.start();
+    const dt=1000/(c.fps||30);
+    while(st.phase!=='done'){ step(st,c,dt); render(c,st); await sleep(dt); }
+    for(let i=0;i<Math.round(0.5*(c.fps||30));i++){ render(c,st); await sleep(dt); }
+    rec.stop(); await done;
+    const blob=new Blob(chunks,{type:mime}); const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='overlay_fullpanel_center.webm'; document.body.appendChild(a); a.click(); a.remove();
+    $('status').textContent='Скачан overlay_fullpanel_center.webm';
+  }catch(e){ console.error(e); $('status').textContent='Ошибка экспорта: '+e.message; }
+  finally{ running=false; $('exportBtn').disabled=false; }
+}
+
+/* — Bindings — */
+$('previewBtn').addEventListener('click', preview);
+$('exportBtn').addEventListener('click', exportWebM);
+render(cfg(), buildState(cfg()));
+</script>
+</body>
+</html>
