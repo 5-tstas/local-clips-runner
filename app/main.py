@@ -1,0 +1,18 @@
+# app/main.py
+import threading, time, webbrowser
+import uvicorn
+from .server import app  # noqa
+
+PORT = 7080
+URL = f"http://127.0.0.1:{PORT}/"
+
+def open_browser_later():
+    time.sleep(0.8)
+    try:
+        webbrowser.open(URL)
+    except Exception:
+        pass
+
+if __name__ == "__main__":
+    threading.Thread(target=open_browser_later, daemon=True).start()
+    uvicorn.run("app.server:app", host="127.0.0.1", port=PORT, reload=False, log_level="info")

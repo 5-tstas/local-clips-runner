@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Local Clips Runner</title>
+  <style>
+    :root { --bg:#0b0b0b; --fg:#eaeaea; --muted:#9aa0a6; --acc:#4c8bf5; }
+    html,body{margin:0;height:100%;font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--fg);}
+    .wrap{max-width:720px;margin:6vh auto;padding:24px;}
+    .card{background:#151515;border:1px solid #222;border-radius:16px;padding:24px;box-shadow:0 6px 24px rgba(0,0,0,.3);}
+    h1{margin:0 0 16px;font-size:22px}
+    p{color:var(--muted);margin:0 0 16px}
+    .row{display:flex;gap:12px;align-items:center}
+    .row > * {flex:1}
+    input[type=file]{padding:14px;background:#0f0f0f;border:1px dashed #333;border-radius:12px;color:var(--fg)}
+    button{appearance:none;border:0;border-radius:12px;padding:14px 18px;background:var(--acc);color:#fff;font-weight:600;cursor:pointer}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .hint{font-size:12px;color:var(--muted)}
+    .ok{color:#6dd56d}
+    .err{color:#ff6b6b;white-space:pre-wrap}
+    .footer{margin-top:16px;font-size:12px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Local Clips Runner</h1>
+      <p>Загрузите JSON-батч (из GPT-5 Plus) и получите ZIP с .webm клипами.</p>
+
+      <form id="form" method="post" action="/render" enctype="multipart/form-data" target="_blank">
+        <div class="row" style="margin-bottom:12px">
+          <input id="file" name="json_file" type="file" accept="application/json" required />
+        </div>
+        <div class="row">
+          <button id="btn" type="submit" disabled>Render ZIP</button>
+        </div>
+        <div id="msg" class="hint">Файл будет сохранён в <code>~/Movies/ClipsRunner/&lt;дата&gt;/clips.zip</code></div>
+      </form>
+
+      <div class="footer">WEBM-only · локально · без ffmpeg/mp4</div>
+    </div>
+  </div>
+
+  <script>
+    const file = document.getElementById('file');
+    const btn  = document.getElementById('btn');
+    const msg  = document.getElementById('msg');
+    file.addEventListener('change', () => {
+      btn.disabled = !file.files.length;
+      msg.textContent = file.files.length ? 'Готово к рендеру. Нажмите Render ZIP.' :
+        'Файл будет сохранён в ~/Movies/ClipsRunner/<дата>/clips.zip';
+    });
+    // Если сервер вернёт JSON с ошибкой (редко), откроется вкладка с текстом.
+  </script>
+</body>
+</html>
