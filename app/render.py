@@ -8,7 +8,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from pydantic import ValidationError
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
 
-from .models import Batch, Job, Output, validate_batch
+from models import Batch, Job, Output, validate_batch
 
 # ----- пути в репозитории -----
 REPO_ROOT = Path(__file__).resolve().parents[1]

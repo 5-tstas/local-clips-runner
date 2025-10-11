@@ -24,4 +24,4 @@ def open_browser_later():
 
 if __name__ == "__main__":
     threading.Thread(target=open_browser_later, daemon=True).start()
-    uvicorn.run("app.server:app", host="127.0.0.1", port=PORT, reload=False, log_level="info")
+    uvicorn.run(app, host="127.0.0.1", port=PORT, reload=False, log_level="info")
