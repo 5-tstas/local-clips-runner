@@ -1,0 +1,44 @@
+{
+  "output": {
+    "size": [1280, 720],
+    "theme": "dark",
+    "bgColor": "#000000",
+    "textColor": "#FFFFFF",
+    "fontFamily": "Inter, Arial, sans-serif",
+    "safeArea": [48, 48, 48, 48]
+  },
+  "jobs": [
+    {
+      "type": "overlay",
+      "name": "001_overlay_intro",
+      "durationSec": 14,
+      "payload": {
+        "title": "GPT-5 Pulse уже здесь",
+        "subtitle": "Утренний дайджест под вас",
+        "body": ["Обучите сегодня — выиграете завтра"],
+        "vCenter": true
+      }
+    },
+    {
+      "type": "chat",
+      "name": "002_chat_setup",
+      "durationSec": 22,
+      "payload": {
+        "lines": ["Подключаю Pulse…", "Собираю идеи…", "Готово!"],
+        "typingSpeed": 1.0,
+        "cursor": true
+      }
+    },
+    {
+      "type": "abc",
+      "name": "003_abc_steps",
+      "durationSec": 9,
+      "payload": {
+        "images": ["samples/a.png", "samples/b.png", "samples/c.png"],
+        "captions": ["Шаг 1", "Шаг 2", "Шаг 3"],
+        "perSlideSec": 3,
+        "transition": "fade"
+      }
+    }
+  ]
+}
