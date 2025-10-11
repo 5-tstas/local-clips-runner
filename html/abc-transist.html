@@ -237,6 +237,7 @@ async function preview(){
       await sleep(1000/opts.fps);
       if(!previewRunning) break;
     }
+    window.__CLIP_DONE__ = true;
     $('status').textContent='Готово';
   } catch(e){
     console.error(e);
@@ -288,6 +289,22 @@ async function exportWebM(){
 $('previewBtn').addEventListener('click', ()=>{ previewRunning=false; preview(); });
 $('exportBtn').addEventListener('click', exportWebM);
 </script>
+<script>
+(async () => {
+  const qs = new URLSearchParams(location.search);
+  const b64 = qs.get('data') || '';
+  let STATE = {};
+  if (b64) { try { STATE = JSON.parse(atob(b64)); } catch(e){} }
+  window.STATE = STATE;
+  if (document.fonts?.ready) { try { await document.fonts.ready; } catch(_){} }
+
+  // Если у вас есть свои init-функции — вызывайте их здесь:
+  if (window.initOverlay) window.initOverlay(STATE);
+  if (window.initChat) window.initChat(STATE);
+  if (window.initABC) window.initABC(STATE);
+})();
+</script>
+
 </body>
 </html>
 

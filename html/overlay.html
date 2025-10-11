@@ -276,7 +276,9 @@ async function preview(){
   function frame(now){
     if(!running) return; const dt=now-last; last=now; step(st,c,dt); render(c,st);
     if(st.phase!=='done') requestAnimationFrame(frame);
-    else { running=false; $('status').textContent='Готово'; }
+    else { running=false; 
+    window.__CLIP_DONE__ = true;
+    $('status').textContent='Готово'; }
   }
   requestAnimationFrame(ts=>{ last=ts; frame(ts); });
 }
@@ -306,5 +308,21 @@ $('previewBtn').addEventListener('click', preview);
 $('exportBtn').addEventListener('click', exportWebM);
 render(cfg(), buildState(cfg()));
 </script>
+<script>
+(async () => {
+  const qs = new URLSearchParams(location.search);
+  const b64 = qs.get('data') || '';
+  let STATE = {};
+  if (b64) { try { STATE = JSON.parse(atob(b64)); } catch(e){} }
+  window.STATE = STATE;
+  if (document.fonts?.ready) { try { await document.fonts.ready; } catch(_){} }
+
+  // Если у вас есть свои init-функции — вызывайте их здесь:
+  if (window.initOverlay) window.initOverlay(STATE);
+  if (window.initChat) window.initChat(STATE);
+  if (window.initABC) window.initABC(STATE);
+})();
+</script>
+
 </body>
 </html>
