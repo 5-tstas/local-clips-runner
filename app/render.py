@@ -18,15 +18,15 @@ HTML_BY_TYPE: Dict[str, str] = {
     "abc":     "abc-transist.html",
 }
 
+# ---------- утилиты ----------
 def _slug(s: str) -> str:
-    s = s.strip().lower()
+    s = (s or "").strip().lower()
     s = re.sub(r"[^a-z0-9]+", "-", s)
     return re.sub(r"-+", "-", s).strip("-") or "clip"
 
 def _outfile_name(idx: int, job: Job) -> str:
     return f"{idx:03d}_{job.type}_{_slug(job.name)}.webm"
 
-# ---------- утилиты ----------
 async def _fill(page, selector: str, value) -> None:
     el = await page.query_selector(selector)
     if not el or value is None:
@@ -54,7 +54,7 @@ async def _set_file(page, selector: str, path: Path) -> bool:
     return True
 
 async def _start_preview(page, job_type: str) -> None:
-    # автозапуск для записи экрана (fallback)
+    # автозапуск предпросмотра (для записи экрана)
     launchers = {
         "overlay": ["preview", "runPreview", "start", "play"],
         "chat":    ["runPreview", "preview", "start", "play"],
@@ -67,15 +67,14 @@ async def _start_preview(page, job_type: str) -> None:
         if (typeof fn === 'function') {
           try { fn(S); return true; } catch(_) {}
           try { fn();  return true; } catch(_) {}
-        }
-      }
+      }}
       const sels = ['#btnPreview','#preview','[data-action="preview"]','.preview','button'];
       for (const sel of sels) { const el = document.querySelector(sel); if (el) { el.click(); return true; } }
       return false;
     }""", launchers)
 
 async def _try_export(page, prefer_funcs: List[str], btn_ids: List[str]) -> bool:
-    # Пытаемся запустить экспорт WebM без предпросмотра
+    # Запуск экспорта (без предпросмотра)
     code = f"""
 (() => {{
   const tryFns = {json.dumps(prefer_funcs)};
@@ -106,12 +105,14 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
 
     # Слить глобальные стили (output) в payload (локальные перекрывают)
     payload = job.payload.dict()
-    for k in ("bgColor", "textColor", "fontFamily"):
-        payload.setdefault(k, getattr(output, k))
+    for k in ("bgColor","textColor","fontFamily","cpsPrompt","cpsAnswer","pauseSentence","pauseComma","fps","soundOn","thinkSec"):
+        v = getattr(output, k, None)
+        if v is not None and k not in payload:
+            payload[k] = v
 
-    # Передаём STATE как base64(JSON) на случай если страница умеет читать query
+    # Передаём STATE как base64(JSON) и глушим автостарт (?autostart=0)
     b64 = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
-    url = html_path.as_uri() + "?data=" + b64
+    url = html_path.as_uri() + "?autostart=0&data=" + b64
 
     w, h = output.size
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -119,7 +120,7 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
     tmp_videos.mkdir(exist_ok=True)
 
     async with async_playwright() as p:
-        # всегда включаем запись (на случай фолбэка)
+        # ВСЕГДА включаем запись как фолбэк
         browser = await p.chromium.launch()
         context = await browser.new_context(
             viewport={"width": w, "height": h},
@@ -130,7 +131,7 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
         page = await context.new_page()
         await page.goto(url)
 
-        # убрать «серый» старт
+        # убрать «серый» старт — фон/цвет сразу
         await page.evaluate("""(() => {
           const S = (window.STATE||{});
           if (S.bgColor)  document.body.style.background = S.bgColor;
@@ -148,7 +149,6 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
 
         # ===== тип-специфическая подготовка =====
         if job.type == "overlay":
-            # поля overlay: #title, #subtitle, #body
             t  = payload.get("title") or ""
             st = payload.get("subtitle") or ""
             body = payload.get("body") or []
@@ -157,11 +157,10 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             await _fill(page, "#subtitle", st)
             await _fill(page, "#body", body)
 
-            # попытка экспорта (без preview), иначе — запись
+            # 1) Попытка ЭКСПОРТА
             got = False
             try:
-                started = await _try_export(page,
-                    prefer_funcs=["exportWebM"], btn_ids=["#exportBtn","#btnExport","#export"])
+                started = await _try_export(page, ["exportWebM"], ["#exportBtn","#btnExport","#export"])
                 if started:
                     async with page.expect_download(timeout=120000) as dl:
                         pass
@@ -172,6 +171,7 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             except Exception:
                 got = False
 
+            # 2) Фолбэк — запись
             if not got:
                 await _start_preview(page, "overlay")
                 duration_ms = max(500, job.durationSec * 1000)
@@ -189,46 +189,61 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             return out_dir / _outfile_name(idx, job)
 
         elif job.type == "chat":
-            # поля chat: #answer (+ #prompt), параметры печати, звук off
+            # Заполняем поля, НО экспорт НЕ используем — только запись экрана (устраняем зависания)
             lines = payload.get("lines") or []
-            answer = "\n\n".join(str(x) for x in lines) if isinstance(lines, list) else str(lines)
-            await _fill(page, "#answer", answer)
+            md = "\n\n".join(lines) if isinstance(lines, list) else str(lines)
+            await _fill(page, "#answer", md)
             if payload.get("prompt"): await _fill(page, "#prompt", payload.get("prompt"))
-            for sel, val in [("#cpsPrompt","14"),("#cpsAnswer","20"),
-                             ("#thinkSec","2"),("#pauseSentence","220"),("#pauseComma","110"),("#fps","30")]:
+
+            # скорости/паузы/FPS/звук
+            def _num(v, d): 
+                try: return int(v) if v is not None else d
+                except: return d
+            cps_prompt = _num(payload.get("cpsPrompt"), 14)
+            cps_answer = _num(payload.get("cpsAnswer"), 20)
+            pause_sentence = _num(payload.get("pauseSentence"), 220)
+            pause_comma    = _num(payload.get("pauseComma"), 110)
+            fps            = _num(payload.get("fps"), 30)
+            think_sec      = _num(payload.get("thinkSec"), 2)
+
+            for sel, val in [
+                ("#cpsPrompt", str(cps_prompt)),
+                ("#cpsAnswer", str(cps_answer)),
+                ("#pauseSentence", str(pause_sentence)),
+                ("#pauseComma", str(pause_comma)),
+                ("#fps", str(fps)),
+            ]:
                 await _fill(page, sel, val)
-            await _fill(page, "#soundOn", "")  # выключить
+            await _fill(page, "#soundOn", "")  # выкл звук в headless
 
-            # экспорта хватит (runExport), если нет — запись
-            got = False
+            # автопревью и запись до конца (или до оценки времени)
+            await _start_preview(page, "chat")
+
+            # оценка длительности
+            txt_prompt = payload.get("prompt") or ""
+            text = (txt_prompt + "\n" + md)
+            sent = len(re.findall(r"[.!?…]", text))
+            comm = len(re.findall(r"[,;:]", text))
+            est_ms = int(
+                1000 * think_sec
+                + (len(txt_prompt) * 1000) / max(1, cps_prompt)
+                + (len(md) * 1000) / max(1, cps_answer)
+                + sent * pause_sentence
+                + comm * pause_comma
+                + 1500  # хвост после печати
+            )
+            duration_ms = max(3000, min(est_ms, 120000))  # 3с..120с
+
             try:
-                started = await _try_export(page,
-                    prefer_funcs=["runExport"], btn_ids=["#exportBtn","#btnExport","#export"])
-                if started:
-                    async with page.expect_download(timeout=120000) as dl:
-                        pass
-                    download = await dl.value
-                    dst = out_dir / _outfile_name(idx, job)
-                    await download.save_as(dst.as_posix())
-                    got = True
-            except Exception:
-                got = False
+                await page.wait_for_function("() => window.__CLIP_DONE__ === true", timeout=duration_ms + 2000)
+            except PWTimeoutError:
+                await page.wait_for_timeout(duration_ms)
 
-            if not got:
-                await _start_preview(page, "chat")  # runPreview() / кнопка
-                duration_ms = max(500, job.durationSec * 1000)
-                try:
-                    await page.wait_for_function("() => window.__CLIP_DONE__ === true", timeout=duration_ms + 3000)
-                except PWTimeoutError:
-                    await page.wait_for_timeout(duration_ms)
-                video = page.video
-                await context.close(); await browser.close()
-                src = Path(await video.path())  # type: ignore[arg-type]
-                dst = out_dir / _outfile_name(idx, job)
-                src.replace(dst); return dst
-
+            video = page.video
             await context.close(); await browser.close()
-            return out_dir / _outfile_name(idx, job)
+            src = Path(await video.path())  # type: ignore[arg-type]
+            dst = out_dir / _outfile_name(idx, job)
+            src.replace(dst); return dst
 
         else:  # ABC
             images = payload.get("images") or []
@@ -241,11 +256,9 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             await _set_file(page, "#fB", _abs(images[1]))
             await _set_file(page, "#fC", _abs(images[2]))
 
-            # сначала экспорт…
             got = False
             try:
-                started = await _try_export(page,
-                    prefer_funcs=["exportWebM"], btn_ids=["#exportBtn","#btnExport","#export"])
+                started = await _try_export(page, ["exportWebM"], ["#exportBtn","#btnExport","#export"])
                 if started:
                     async with page.expect_download(timeout=120000) as dl:
                         pass
@@ -257,7 +270,6 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
                 got = False
 
             if not got:
-                # …если нет — запись
                 await _start_preview(page, "abc")
                 duration_ms = max(500, job.durationSec * 1000)
                 try:
@@ -287,6 +299,7 @@ async def render_batch(batch: Batch, out_dir: Path) -> Path:
         for f in outs:
             zf.write(f, arcname=f.name)
     return zip_path
+
 
 
 

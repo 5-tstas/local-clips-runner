@@ -1,4 +1,3 @@
-# app/server.py
 from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
@@ -38,14 +37,14 @@ async def render(json_file: UploadFile = File(...)):
     content = await json_file.read()
     try:
         data = json.loads(content.decode("utf-8"))
-        batch = Batch(**data)  # старая схема: output + jobs[]
+        batch = Batch(**data)  # схема: output + jobs[]
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Некорректный JSON: {e}")
 
     (out_dir / "batch.json").write_bytes(content)
 
     try:
-        zip_path = await render_batch(batch, out_dir)   # два аргумента
+        zip_path = await render_batch(batch, out_dir)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
