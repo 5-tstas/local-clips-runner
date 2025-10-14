@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run server (uvicorn)",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "app.server:app",
+        "--host", "127.0.0.1",
+        "--port", "7080",
+        "--app-dir", "${workspaceFolder}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": { "PYTHONPATH": "${workspaceFolder}" },
+      "console": "internalConsole",
+      "justMyCode": true
+    }
+  ]
+}
+

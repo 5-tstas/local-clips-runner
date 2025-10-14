@@ -205,3 +205,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# рабочие примеры/картинки и артефакты
+samples/
+*.webm
+*.zip
+.DS_Store
+html/*.webm
+Movies/
+ClipsRunner/
+
