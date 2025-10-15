@@ -25,6 +25,11 @@
   .stage{width:var(--w);height:var(--h);background:#000;border-radius:12px;box-shadow:0 0 0 1px var(--line),0 12px 40px rgba(0,0,0,.5);overflow:hidden}
   canvas{display:block;width:100%;height:100%}
 </style>
+<!-- общие утилиты записи WebM -->
+<script type="module" src="./js/recorder.js"></script>
+<!-- опциональный фиксер длительности (даже заглушка не повредит) -->
+<script src="./vendor/webm-duration-fix.min.js"></script>
+
 </head>
 <body>
 <div class="wrap">
