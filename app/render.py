@@ -53,26 +53,6 @@ async def _set_file(page, selector: str, path: Path) -> bool:
     await el.set_input_files(path.as_posix())
     return True
 
-async def _start_preview(page, job_type: str) -> None:
-    # автозапуск предпросмотра (для записи экрана)
-    launchers = {
-        "overlay": ["preview", "runPreview", "start", "play"],
-        "chat":    ["runPreview", "preview", "start", "play"],
-        "abc":     ["preview", "start", "play"],
-    }.get(job_type, ["preview","runPreview","start","play"])
-    await page.evaluate("""(names) => {
-      const S = (window.STATE||{});
-      for (const name of names) {
-        const fn = window[name];
-        if (typeof fn === 'function') {
-          try { fn(S); return true; } catch(_) {}
-          try { fn();  return true; } catch(_) {}
-      }}
-      const sels = ['#btnPreview','#preview','[data-action="preview"]','.preview','button'];
-      for (const sel of sels) { const el = document.querySelector(sel); if (el) { el.click(); return true; } }
-      return false;
-    }""", launchers)
-
 async def _try_export(page, prefer_funcs: List[str], btn_ids: List[str]) -> bool:
     # Запуск экспорта (без предпросмотра)
     code = f"""
@@ -116,17 +96,11 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
 
     w, h = output.size
     out_dir.mkdir(parents=True, exist_ok=True)
-    tmp_videos = out_dir / ".tmp_videos"
-    tmp_videos.mkdir(exist_ok=True)
-
     async with async_playwright() as p:
-        # ВСЕГДА включаем запись как фолбэк
         browser = await p.chromium.launch()
         context = await browser.new_context(
             viewport={"width": w, "height": h},
             accept_downloads=True,
-            record_video_dir=str(tmp_videos),
-            record_video_size={"width": w, "height": h},
         )
         page = await context.new_page()
         await page.goto(url)
@@ -157,39 +131,18 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             await _fill(page, "#subtitle", st)
             await _fill(page, "#body", body)
 
-            # 1) Попытка ЭКСПОРТА
-            got = False
-            try:
+            await page.wait_for_function("typeof window.exportWebM === 'function'", timeout=10000)
+            async with page.expect_download(timeout=120000) as dl:
                 started = await _try_export(page, ["exportWebM"], ["#exportBtn","#btnExport","#export"])
-                if started:
-                    async with page.expect_download(timeout=120000) as dl:
-                        pass
-                    download = await dl.value
-                    dst = out_dir / _outfile_name(idx, job)
-                    await download.save_as(dst.as_posix())
-                    got = True
-            except Exception:
-                got = False
-
-            # 2) Фолбэк — запись
-            if not got:
-                await _start_preview(page, "overlay")
-                duration_ms = max(500, job.durationSec * 1000)
-                try:
-                    await page.wait_for_function("() => window.__CLIP_DONE__ === true", timeout=duration_ms + 3000)
-                except PWTimeoutError:
-                    await page.wait_for_timeout(duration_ms)
-                video = page.video
-                await context.close(); await browser.close()
-                src = Path(await video.path())  # type: ignore[arg-type]
-                dst = out_dir / _outfile_name(idx, job)
-                src.replace(dst); return dst
-
+                if not started:
+                    raise RuntimeError("Не удалось запустить экспорт overlay")
+            download = await dl.value
+            dst = out_dir / _outfile_name(idx, job)
+            await download.save_as(dst.as_posix())
             await context.close(); await browser.close()
-            return out_dir / _outfile_name(idx, job)
+            return dst
 
         elif job.type == "chat":
-            # Заполняем поля, НО экспорт НЕ используем — только запись экрана (устраняем зависания)
             lines = payload.get("lines") or []
             md = "\n\n".join(lines) if isinstance(lines, list) else str(lines)
             await _fill(page, "#answer", md)
@@ -204,8 +157,6 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             pause_sentence = _num(payload.get("pauseSentence"), 220)
             pause_comma    = _num(payload.get("pauseComma"), 110)
             fps            = _num(payload.get("fps"), 30)
-            think_sec      = _num(payload.get("thinkSec"), 2)
-
             for sel, val in [
                 ("#cpsPrompt", str(cps_prompt)),
                 ("#cpsAnswer", str(cps_answer)),
@@ -216,34 +167,16 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
                 await _fill(page, sel, val)
             await _fill(page, "#soundOn", "")  # выкл звук в headless
 
-            # автопревью и запись до конца (или до оценки времени)
-            await _start_preview(page, "chat")
-
-            # оценка длительности
-            txt_prompt = payload.get("prompt") or ""
-            text = (txt_prompt + "\n" + md)
-            sent = len(re.findall(r"[.!?…]", text))
-            comm = len(re.findall(r"[,;:]", text))
-            est_ms = int(
-                1000 * think_sec
-                + (len(txt_prompt) * 1000) / max(1, cps_prompt)
-                + (len(md) * 1000) / max(1, cps_answer)
-                + sent * pause_sentence
-                + comm * pause_comma
-                + 1500  # хвост после печати
-            )
-            duration_ms = max(3000, min(est_ms, 120000))  # 3с..120с
-
-            try:
-                await page.wait_for_function("() => window.__CLIP_DONE__ === true", timeout=duration_ms + 2000)
-            except PWTimeoutError:
-                await page.wait_for_timeout(duration_ms)
-
-            video = page.video
-            await context.close(); await browser.close()
-            src = Path(await video.path())  # type: ignore[arg-type]
+            await page.wait_for_function("typeof window.exportWebM === 'function'", timeout=10000)
+            async with page.expect_download(timeout=180000) as dl:
+                started = await _try_export(page, ["exportWebM"], ["#exportBtn","#btnExport","#export"])
+                if not started:
+                    raise RuntimeError("Не удалось запустить экспорт chat")
+            download = await dl.value
             dst = out_dir / _outfile_name(idx, job)
-            src.replace(dst); return dst
+            await download.save_as(dst.as_posix())
+            await context.close(); await browser.close()
+            return dst
 
         else:  # ABC
             images = payload.get("images") or []
@@ -256,34 +189,16 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             await _set_file(page, "#fB", _abs(images[1]))
             await _set_file(page, "#fC", _abs(images[2]))
 
-            got = False
-            try:
+            await page.wait_for_function("typeof window.exportWebM === 'function'", timeout=10000)
+            async with page.expect_download(timeout=180000) as dl:
                 started = await _try_export(page, ["exportWebM"], ["#exportBtn","#btnExport","#export"])
-                if started:
-                    async with page.expect_download(timeout=120000) as dl:
-                        pass
-                    download = await dl.value
-                    dst = out_dir / _outfile_name(idx, job)
-                    await download.save_as(dst.as_posix())
-                    got = True
-            except Exception:
-                got = False
-
-            if not got:
-                await _start_preview(page, "abc")
-                duration_ms = max(500, job.durationSec * 1000)
-                try:
-                    await page.wait_for_function("() => window.__CLIP_DONE__ === true", timeout=duration_ms + 3000)
-                except PWTimeoutError:
-                    await page.wait_for_timeout(duration_ms)
-                video = page.video
-                await context.close(); await browser.close()
-                src = Path(await video.path())  # type: ignore[arg-type]
-                dst = out_dir / _outfile_name(idx, job)
-                src.replace(dst); return dst
-
+                if not started:
+                    raise RuntimeError("Не удалось запустить экспорт abc")
+            download = await dl.value
+            dst = out_dir / _outfile_name(idx, job)
+            await download.save_as(dst.as_posix())
             await context.close(); await browser.close()
-            return out_dir / _outfile_name(idx, job)
+            return dst
 
 async def render_batch(batch: Batch, out_dir: Path) -> Path:
     validate_batch(batch)
