@@ -25,16 +25,27 @@ export function startRecorder(canvas, { fps = 30, vbr = 5_000_000 } = {}) {
   rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   rec.onstart = () => { startedAt = performance.now(); };
 
-  return { rec, chunks, mimeType, getStartedMs: () => startedAt };
+  return {
+    rec,
+    chunks,
+    mimeType,
+    getStartedMs: () => startedAt,
+    getDurationMs: () => Math.max(0, performance.now() - startedAt),
+  };
 }
 
-export async function stopAndDownload({ rec, chunks, mimeType, getStartedMs }, outName, { finalDelayMs = 300 } = {}) {
+export async function stopAndDownload(recCtx, outName, { finalDelayMs = 300 } = {}) {
+  if (!recCtx || !recCtx.rec) throw new Error('Recorder context отсутствует');
+  const { rec, chunks, mimeType, getStartedMs } = recCtx;
+
   // небольшая задержка — гарантируем запись последнего кадра
-  await new Promise(r => setTimeout(r, finalDelayMs));
+  if (finalDelayMs > 0) await new Promise((r) => setTimeout(r, finalDelayMs));
 
   const done = new Promise((resolve) => {
     rec.onstop = async () => {
-      const recordedMs = Math.max(0, performance.now() - getStartedMs());
+      const recordedMs = typeof getStartedMs === 'function'
+        ? Math.max(0, performance.now() - getStartedMs())
+        : 0;
       const raw = new Blob(chunks, { type: mimeType });
 
       // Фикс длительности, если глобальный fixer доступен
@@ -42,7 +53,8 @@ export async function stopAndDownload({ rec, chunks, mimeType, getStartedMs }, o
       try {
         if (typeof window.webmDurationFix === 'function') {
           // ожидаемый интерфейс: webmDurationFix(blob, durationMs) -> Promise<Blob>
-          fixedBlob = await window.webmDurationFix(raw, recordedMs);
+          const durationMs = recordedMs || recCtx.getDurationMs?.() || 0;
+          fixedBlob = await window.webmDurationFix(raw, durationMs);
         }
       } catch (e) {
         console.warn('webmDurationFix failed, fallback to raw blob', e);
@@ -66,4 +78,29 @@ export function downloadBlob(blob, filename) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+export function bindGlobalExport(recCtxOrFn, outName = 'export.webm') {
+  const runExport = async () => {
+    if (typeof recCtxOrFn === 'function') {
+      return await recCtxOrFn(outName);
+    }
+    if (recCtxOrFn && typeof recCtxOrFn === 'object') {
+      return await stopAndDownload(recCtxOrFn, outName, { finalDelayMs: 300 });
+    }
+    throw new Error('Не задан обработчик exportWebM');
+  };
+
+  window.exportWebM = () => runExport();
+
+  const btn = document.querySelector('#exportBtn, #btnExport, #export');
+  if (btn && !btn.dataset.webmBound) {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      window.exportWebM();
+    });
+    btn.dataset.webmBound = '1';
+  }
+
+  return runExport;
 }

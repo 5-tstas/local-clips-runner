@@ -189,14 +189,14 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             return out_dir / _outfile_name(idx, job)
 
         elif job.type == "chat":
-            # Заполняем поля, НО экспорт НЕ используем — только запись экрана (устраняем зависания)
+            # Заполняем поля и используем прямой экспорт WebM
             lines = payload.get("lines") or []
             md = "\n\n".join(lines) if isinstance(lines, list) else str(lines)
             await _fill(page, "#answer", md)
             if payload.get("prompt"): await _fill(page, "#prompt", payload.get("prompt"))
 
             # скорости/паузы/FPS/звук
-            def _num(v, d): 
+            def _num(v, d):
                 try: return int(v) if v is not None else d
                 except: return d
             cps_prompt = _num(payload.get("cpsPrompt"), 14)
@@ -204,7 +204,6 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             pause_sentence = _num(payload.get("pauseSentence"), 220)
             pause_comma    = _num(payload.get("pauseComma"), 110)
             fps            = _num(payload.get("fps"), 30)
-            think_sec      = _num(payload.get("thinkSec"), 2)
 
             for sel, val in [
                 ("#cpsPrompt", str(cps_prompt)),
@@ -216,34 +215,25 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
                 await _fill(page, sel, val)
             await _fill(page, "#soundOn", "")  # выкл звук в headless
 
-            # автопревью и запись до конца (или до оценки времени)
-            await _start_preview(page, "chat")
-
-            # оценка длительности
-            txt_prompt = payload.get("prompt") or ""
-            text = (txt_prompt + "\n" + md)
-            sent = len(re.findall(r"[.!?…]", text))
-            comm = len(re.findall(r"[,;:]", text))
-            est_ms = int(
-                1000 * think_sec
-                + (len(txt_prompt) * 1000) / max(1, cps_prompt)
-                + (len(md) * 1000) / max(1, cps_answer)
-                + sent * pause_sentence
-                + comm * pause_comma
-                + 1500  # хвост после печати
-            )
-            duration_ms = max(3000, min(est_ms, 120000))  # 3с..120с
-
+            got = False
             try:
-                await page.wait_for_function("() => window.__CLIP_DONE__ === true", timeout=duration_ms + 2000)
-            except PWTimeoutError:
-                await page.wait_for_timeout(duration_ms)
+                started = await _try_export(page, ["exportWebM"], ["#exportBtn","#btnExport","#export"])
+                if started:
+                    async with page.expect_download(timeout=180000) as dl:
+                        pass
+                    download = await dl.value
+                    dst = out_dir / _outfile_name(idx, job)
+                    await download.save_as(dst.as_posix())
+                    got = True
+            except Exception:
+                got = False
 
-            video = page.video
+            if not got:
+                await context.close(); await browser.close()
+                raise RuntimeError("Не удалось экспортировать chat_typing.webm")
+
             await context.close(); await browser.close()
-            src = Path(await video.path())  # type: ignore[arg-type]
-            dst = out_dir / _outfile_name(idx, job)
-            src.replace(dst); return dst
+            return out_dir / _outfile_name(idx, job)
 
         else:  # ABC
             images = payload.get("images") or []
