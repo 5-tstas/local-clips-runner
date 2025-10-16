@@ -125,10 +125,10 @@
 </div>
 
 <script type="module">
-import { startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
+import { ensureCanvas, startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
 
 const W=1280,H=720;
-const canvas=document.getElementById('cv');
+const canvas=ensureCanvas('cv',{width:1280,height:720});
 const ctx=canvas.getContext('2d',{alpha:false});
 const $=id=>document.getElementById(id);
 function fontCSS({b,i,fs,font}){ let f=''; if(i) f+='italic '; if(b) f+='800 '; f+=fs+'px '+font; return f; }
@@ -251,8 +251,13 @@ let running=false;
 function runClipWithRaf(c, st){
   return new Promise((resolve) => {
     let lastTs = performance.now();
+    let rafStarted = false;
     const stepFrame = (now) => {
       if (!running) return;
+      if (!rafStarted) {
+        rafStarted = true;
+        window.__clipStage?.('frames_flowing', { canvasId: canvas.id || null, fps: c.fps || 30 });
+      }
       const dt = Math.max(0, now - lastTs);
       lastTs = now;
       step(st, c, dt);

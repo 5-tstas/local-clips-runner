@@ -69,7 +69,7 @@
   <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
 
 <script type="module">
-import { startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
+import { ensureCanvas, startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
 
 /* ---------- Утилиты ---------- */
 const $=id=>document.getElementById(id);
@@ -96,7 +96,7 @@ function mdToBlocks(md){
 }
 
 /* ---------- Разметка/рендер чата ---------- */
-const W=1280,H=720; const cv=$('cv'); const ctx=cv.getContext('2d',{alpha:false});
+const W=1280,H=720; const cv=ensureCanvas('cv',{width:1280,height:720}); const ctx=cv.getContext('2d',{alpha:false});
 function bubble(ctx,x,y,w,txtLines,style){
   // стиль
   ctx.save();
@@ -298,12 +298,17 @@ function animateTyping(cfg, st, shouldContinue = () => true){
       resolve();
     };
     let last = performance.now();
+    let framesLogged = false;
     const stepFrame = (now) => {
       if (!shouldContinue()) { finish(); return; }
       const dt = now - last;
       last = now;
       step(cfg, st, dt);
       renderFrame(cfg, st);
+      if (!framesLogged) {
+        framesLogged = true;
+        window.__clipStage?.('frames_flowing', { canvasId: cv.id || null, fps: cfg.fps || 30 });
+      }
       if (st.phase === 'done') {
         finish();
         return;

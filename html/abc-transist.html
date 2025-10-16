@@ -84,15 +84,38 @@
   </div>
 
 <script type="module">
-import { startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
+import { ensureCanvas, startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
 
 /* ===== Helpers ===== */
 const $ = id => document.getElementById(id);
-const canvas = $('stage'), ctx = canvas.getContext('2d', { alpha:false });
+const canvas = ensureCanvas('stage', { width: 1280, height: 720 });
+const ctx = canvas.getContext('2d', { alpha:false });
+const HARD_CAP_MS = 20_000;
+const FRAME_GUARD_MS = 300;
+let perSlideOverride = null;
+let pendingFrameMark = false;
 function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
 
 function fileToURL(file){ return URL.createObjectURL(file); }
-function preload(url){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; }); }
+function preloadWithTimeout(url, timeoutMs = 8000){
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const timer = setTimeout(() => {
+      img.onload = null;
+      img.onerror = null;
+      rej(new Error('Таймаут загрузки изображения ' + url));
+    }, timeoutMs);
+    img.onload = () => {
+      clearTimeout(timer);
+      res(img);
+    };
+    img.onerror = (err) => {
+      clearTimeout(timer);
+      rej(err || new Error('Не удалось загрузить изображение ' + url));
+    };
+    img.src = url;
+  });
+}
 
 function drawImageFit(ctx, img, mode='contain', zoom=1){
   const W = canvas.width, H = canvas.height;
@@ -206,44 +229,129 @@ function drawFrame(t, imgs, opts){
 }
 
 /* Playback / Export */
-async function loadImages(){
+async function loadImages(timeoutMs = 8000){
   const fa=$('fA').files[0], fb=$('fB').files[0], fc=$('fC').files[0];
   if(!fa||!fb||!fc){ throw new Error('Загрузите три изображения'); }
-  const [a,b,c] = await Promise.all([preload(fileToURL(fa)), preload(fileToURL(fb)), preload(fileToURL(fc))]);
-  return { a,b,c };
+  const files = [fa, fb, fc];
+  const urls = files.map(fileToURL);
+  try {
+    const [a,b,c] = await Promise.all(urls.map((url) => preloadWithTimeout(url, timeoutMs)));
+    return {
+      imgs: { a,b,c },
+      revoke: () => urls.forEach((url) => URL.revokeObjectURL(url))
+    };
+  } catch (err) {
+    urls.forEach((url) => URL.revokeObjectURL(url));
+    throw err;
+  }
+}
+
+function getPerSlideSec(){
+  if (typeof perSlideOverride === 'number' && Number.isFinite(perSlideOverride)) {
+    return clamp(perSlideOverride, 0.5, 20);
+  }
+  const vals = ['durA','durB','durC']
+    .map((id) => parseFloat($(id).value || '0'))
+    .filter((v) => Number.isFinite(v) && v > 0);
+  if (!vals.length) return 6;
+  const avg = vals.reduce((acc, v) => acc + v, 0) / vals.length;
+  return clamp(avg, 0.5, 20);
 }
 
 function getOpts(){
-  const A=parseFloat($('durA').value||'3.3');
-  const B=parseFloat($('durB').value||'3.3');
-  const C=parseFloat($('durC').value||'3.4');
+  const perSlideSec = getPerSlideSec();
   return {
-    A,B,C,
+    A: perSlideSec,
+    B: perSlideSec,
+    C: perSlideSec,
+    perSlideSec,
     fit: $('fitMode').value,
     transAB: $('tAB').value,
     transBC: $('tBC').value,
     fps: clamp(parseInt($('fps').value||'30',10), 15, 60),
-    total: A+B+C
+    total: perSlideSec * 3
   };
 }
 
 let previewRunning=false;
 
+function syncDurInputs(value){
+  const val = clamp(value, 0.5, 20);
+  ['durA','durB','durC'].forEach((id) => {
+    const el = $(id);
+    if (el) el.value = val.toFixed(1);
+  });
+}
+
+['durA','durB','durC'].forEach((id) => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener('change', () => {
+    const v = parseFloat(el.value || '0');
+    if (Number.isFinite(v) && v > 0) {
+      perSlideOverride = clamp(v, 0.5, 20);
+      syncDurInputs(perSlideOverride);
+    }
+  });
+});
+
+window.initABC = (state = {}) => {
+  try {
+    const cfg = state || {};
+    if (cfg.perSlideSec != null) {
+      const val = clamp(parseFloat(cfg.perSlideSec) || 6, 0.5, 20);
+      perSlideOverride = val;
+      syncDurInputs(val);
+    }
+    if (typeof cfg.fps === 'number' && !Number.isNaN(cfg.fps)) {
+      $('fps').value = String(cfg.fps);
+    }
+    if (typeof cfg.fit === 'string') {
+      $('fitMode').value = cfg.fit;
+    }
+    if (typeof cfg.transition === 'string') {
+      $('tAB').value = cfg.transition;
+      $('tBC').value = cfg.transition;
+    }
+  } catch (err) {
+    console.warn('initABC failed', err);
+  }
+};
+
+function markFramesFlowing(perSlideSec) {
+  if (!pendingFrameMark) {
+    pendingFrameMark = true;
+    window.__clipStage?.('frames_flowing', { canvasId: canvas.id || null, perSlideSec });
+  }
+}
+
 function playTransition(imgs, opts, shouldContinue = () => true){
   return new Promise((resolve) => {
+    const perSlideMs = opts.perSlideSec * 1000;
+    const targetMs = perSlideMs * 3;
+    const hardLimit = Math.min(targetMs + FRAME_GUARD_MS, HARD_CAP_MS);
     const start = performance.now();
-    const totalMs = opts.total * 1000;
+
     const frame = (now) => {
       if (!shouldContinue()) { resolve(); return; }
       const elapsed = now - start;
-      const t = Math.min(opts.total, elapsed / 1000);
+      const clamped = Math.min(elapsed, targetMs);
+      const t = clamped / 1000;
       drawFrame(t, imgs, opts);
-      if (elapsed >= totalMs) {
+      markFramesFlowing(opts.perSlideSec);
+
+      if (elapsed >= targetMs + FRAME_GUARD_MS) {
+        resolve();
+        return;
+      }
+      if (elapsed >= hardLimit) {
+        console.warn('ABC: превышен лимит анимации, обрываем', { elapsed, hardLimit });
         resolve();
         return;
       }
       requestAnimationFrame(frame);
     };
+
     drawFrame(0, imgs, opts);
     requestAnimationFrame(frame);
   });
@@ -253,10 +361,15 @@ async function preview(){
   if(previewRunning) return;
   previewRunning=true;
   window.__CLIP_DONE__ = false;
+  let revoke;
+  let imgs;
   try{
     $('status').textContent='Предпросмотр…';
-    const imgs = await loadImages();
+    const loaded = await loadImages();
+    imgs = loaded.imgs;
+    revoke = loaded.revoke;
     const opts = getOpts();
+    pendingFrameMark = false;
     await playTransition(imgs, opts, () => previewRunning);
     if (previewRunning) {
       window.__CLIP_DONE__ = true;
@@ -267,6 +380,7 @@ async function preview(){
     $('status').textContent='Ошибка: ' + e.message;
   } finally{
     previewRunning=false;
+    try { revoke?.(); } catch(_){}
   }
 }
 
@@ -274,20 +388,26 @@ async function performExport(){
   window.__CLIP_DONE__ = false;
   $('exportBtn').disabled=true;
   $('status').textContent='Экспорт WebM…';
+  let revoke;
+  let imgs;
   try{
-    const imgs = await loadImages();
+    const loaded = await loadImages();
+    imgs = loaded.imgs;
+    revoke = loaded.revoke;
     const opts = getOpts();
+    pendingFrameMark = false;
     drawFrame(0, imgs, opts);
     const recCtx = startRecorder(canvas, { fps: opts.fps, vbr: 5_000_000 });
     recCtx.rec.start();
     await playTransition(imgs, opts);
-    await stopAndDownload(recCtx, 'abc_transition.webm', { finalDelayMs: 300 });
+    await stopAndDownload(recCtx, 'abc_transition.webm', { finalDelayMs: FRAME_GUARD_MS });
     $('status').textContent = 'Готово: скачан WebM';
     window.__CLIP_DONE__ = true;
   } catch(e){
     console.error(e);
     $('status').textContent='Экспорт не удался: '+e.message;
   } finally{
+    try { revoke?.(); } catch(_){}
     $('exportBtn').disabled=false;
   }
 }
