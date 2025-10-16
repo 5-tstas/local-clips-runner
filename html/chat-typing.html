@@ -352,6 +352,8 @@ async function performExport(){
     renderFrame(cfg, st);
     const recCtx = startRecorder(cv, { fps: cfg.fps || 30, vbr: 5_000_000 });
     recCtx.rec.start();
+    const framesOk = await recCtx.waitForFrames;
+    if (!framesOk) throw new Error('Не удалось запустить поток кадров canvas');
     await animateTyping(cfg, st, () => running);
     await new Promise((r) => setTimeout(r, 300));
     await stopAndDownload(recCtx, 'chat_typing.webm', { finalDelayMs: 300 });

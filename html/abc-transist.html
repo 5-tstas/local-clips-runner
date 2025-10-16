@@ -91,8 +91,23 @@ const $ = id => document.getElementById(id);
 const canvas = $('stage'), ctx = canvas.getContext('2d', { alpha:false });
 function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
 
+const PRELOAD_TIMEOUT_MS = 8000;
+const MAX_RUN_MS = 20_000;
+const GUARD_SLACK_MS = 400;
+
 function fileToURL(file){ return URL.createObjectURL(file); }
-function preload(url){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; }); }
+function preload(url, timeoutMs = PRELOAD_TIMEOUT_MS){
+  return new Promise((res,rej)=>{
+    const i=new Image();
+    const timer = setTimeout(()=>{
+      i.src = '';
+      rej(new Error('Timeout loading '+url));
+    }, timeoutMs);
+    i.onload=()=>{ clearTimeout(timer); res(i); };
+    i.onerror=(e)=>{ clearTimeout(timer); rej(e instanceof Error ? e : new Error('Failed to load image')); };
+    i.src=url;
+  });
+}
 
 function drawImageFit(ctx, img, mode='contain', zoom=1){
   const W = canvas.width, H = canvas.height;
@@ -209,8 +224,17 @@ function drawFrame(t, imgs, opts){
 async function loadImages(){
   const fa=$('fA').files[0], fb=$('fB').files[0], fc=$('fC').files[0];
   if(!fa||!fb||!fc){ throw new Error('Загрузите три изображения'); }
-  const [a,b,c] = await Promise.all([preload(fileToURL(fa)), preload(fileToURL(fb)), preload(fileToURL(fc))]);
-  return { a,b,c };
+  const urls = [fileToURL(fa), fileToURL(fb), fileToURL(fc)];
+  try {
+    const [a,b,c] = await Promise.all(urls.map((u) => preload(u)));
+    return {
+      a,b,c,
+      revoke(){ urls.forEach((u) => URL.revokeObjectURL(u)); }
+    };
+  } catch (err) {
+    urls.forEach((u) => URL.revokeObjectURL(u));
+    throw err instanceof Error ? err : new Error('Не удалось загрузить изображения');
+  }
 }
 
 function getOpts(){
@@ -229,23 +253,45 @@ function getOpts(){
 
 let previewRunning=false;
 
-function playTransition(imgs, opts, shouldContinue = () => true){
+function animateABC(imgs, opts, shouldContinue = () => true){
+  const plannedMs = Math.max(0, opts.total * 1000);
+  const guardMs = Math.min(MAX_RUN_MS, plannedMs + GUARD_SLACK_MS);
+  window.__ABC_TIMELINE__ = { plannedMs, guardMs, startedAt: performance.now(), completed: false };
   return new Promise((resolve) => {
+    let rafId = 0;
+    let finished = false;
     const start = performance.now();
-    const totalMs = opts.total * 1000;
-    const frame = (now) => {
-      if (!shouldContinue()) { resolve(); return; }
+    const done = (info) => {
+      if (finished) return;
+      finished = true;
+      if (rafId) cancelAnimationFrame(rafId);
+      window.__ABC_TIMELINE__ = { ...window.__ABC_TIMELINE__, completed: true, ...info };
+      resolve(info);
+    };
+    const step = (now) => {
+      if (!shouldContinue()) { done({ elapsedMs: now - start, cancelled: true }); return; }
       const elapsed = now - start;
       const t = Math.min(opts.total, elapsed / 1000);
       drawFrame(t, imgs, opts);
-      if (elapsed >= totalMs) {
-        resolve();
+      if (elapsed >= plannedMs) {
+        done({ elapsedMs: elapsed, guardTriggered: false });
         return;
       }
-      requestAnimationFrame(frame);
+      if (elapsed >= guardMs) {
+        console.warn('ABC guard triggered', { elapsed, guardMs, plannedMs });
+        done({ elapsedMs: guardMs, guardTriggered: true });
+        return;
+      }
+      rafId = requestAnimationFrame(step);
     };
     drawFrame(0, imgs, opts);
-    requestAnimationFrame(frame);
+    rafId = requestAnimationFrame(step);
+    setTimeout(() => {
+      if (!finished) {
+        console.warn('ABC guard timeout fallback', { guardMs });
+        done({ elapsedMs: guardMs, guardTriggered: true, timeoutFallback: true });
+      }
+    }, guardMs + 50);
   });
 }
 
@@ -253,11 +299,12 @@ async function preview(){
   if(previewRunning) return;
   previewRunning=true;
   window.__CLIP_DONE__ = false;
+  let imgs = null;
   try{
     $('status').textContent='Предпросмотр…';
-    const imgs = await loadImages();
+    imgs = await loadImages();
     const opts = getOpts();
-    await playTransition(imgs, opts, () => previewRunning);
+    await animateABC(imgs, opts, () => previewRunning);
     if (previewRunning) {
       window.__CLIP_DONE__ = true;
       $('status').textContent='Готово';
@@ -266,6 +313,7 @@ async function preview(){
     console.error(e);
     $('status').textContent='Ошибка: ' + e.message;
   } finally{
+    imgs?.revoke?.();
     previewRunning=false;
   }
 }
@@ -274,13 +322,19 @@ async function performExport(){
   window.__CLIP_DONE__ = false;
   $('exportBtn').disabled=true;
   $('status').textContent='Экспорт WebM…';
+  let imgs = null;
   try{
-    const imgs = await loadImages();
+    imgs = await loadImages();
     const opts = getOpts();
     drawFrame(0, imgs, opts);
     const recCtx = startRecorder(canvas, { fps: opts.fps, vbr: 5_000_000 });
     recCtx.rec.start();
-    await playTransition(imgs, opts);
+    const framesOk = await recCtx.waitForFrames;
+    if (!framesOk) throw new Error('Не удалось запустить поток кадров canvas');
+    const info = await animateABC(imgs, opts);
+    if (info?.guardTriggered) {
+      console.warn('ABC экспорт завершён по guard', info);
+    }
     await stopAndDownload(recCtx, 'abc_transition.webm', { finalDelayMs: 300 });
     $('status').textContent = 'Готово: скачан WebM';
     window.__CLIP_DONE__ = true;
@@ -288,6 +342,7 @@ async function performExport(){
     console.error(e);
     $('status').textContent='Экспорт не удался: '+e.message;
   } finally{
+    imgs?.revoke?.();
     $('exportBtn').disabled=false;
   }
 }
@@ -295,6 +350,27 @@ async function performExport(){
 /* Bindings */
 $('previewBtn').addEventListener('click', ()=>{ previewRunning=false; preview(); });
 bindGlobalExport(performExport);
+
+window.initABC = function initABCState(STATE = {}) {
+  const per = Number(STATE.perSlideSec);
+  if (Number.isFinite(per) && per > 0) {
+    ['durA','durB','durC'].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.value = String(per);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+  if (STATE.fps) {
+    const fpsEl = $('fps');
+    if (fpsEl) {
+      fpsEl.value = String(STATE.fps);
+      fpsEl.dispatchEvent(new Event('input', { bubbles: true }));
+      fpsEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+};
 </script>
 <script>
 (async () => {

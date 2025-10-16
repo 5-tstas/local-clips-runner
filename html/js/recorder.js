@@ -11,34 +11,132 @@ export function pickWebmMime() {
   return options.find(isSup) || 'video/webm';
 }
 
+function ensureCanvas(canvas) {
+  if (!(canvas instanceof HTMLCanvasElement)) {
+    throw new Error('startRecorder ожидает HTMLCanvasElement');
+  }
+  if (typeof canvas.captureStream !== 'function') {
+    throw new Error('canvas.captureStream() не поддерживается');
+  }
+}
+
+function createTelemetry(canvas, track, targetFps) {
+  const settings = typeof track.getSettings === 'function' ? (track.getSettings() || {}) : {};
+  if (Object.prototype.hasOwnProperty.call(settings, 'displaySurface') && settings.displaySurface) {
+    console.error('startRecorder: обнаружен displaySurface в настройках трека', settings);
+    throw new Error('Источник записи должен быть canvas.captureStream, а не экран');
+  }
+
+  const telemetry = {
+    canvasId: canvas.id || null,
+    width: canvas.width,
+    height: canvas.height,
+    targetFps,
+    trackSettings: settings,
+    stage: 'init',
+    startedAt: null,
+    framesAt: null,
+    stoppedAt: null,
+    exportedAt: null,
+    savedAt: null,
+    framesFlowing: false,
+    frameCount: 0
+  };
+
+  window.__RECORDER_STATE__ = telemetry;
+  return telemetry;
+}
+
 export function startRecorder(canvas, { fps = 30, vbr = 5_000_000 } = {}) {
-  const stream = canvas.captureStream?.(fps);
-  if (!stream) throw new Error('canvas.captureStream() не поддерживается');
+  ensureCanvas(canvas);
+  const stream = canvas.captureStream(fps);
+  if (!(stream instanceof MediaStream)) {
+    throw new Error('canvas.captureStream() вернул некорректный MediaStream');
+  }
+
+  const [track] = stream.getVideoTracks();
+  if (!track || track.kind !== 'video') {
+    throw new Error('canvas.captureStream() не вернул видеотрек');
+  }
+
+  const telemetry = createTelemetry(canvas, track, fps);
 
   const mimeType = pickWebmMime();
   const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: vbr });
 
   const chunks = [];
-  let startedAt = 0;
+  let waitForFramesResolve;
+  const waitForFrames = new Promise((resolve) => {
+    waitForFramesResolve = resolve;
+  });
 
-  rec.ondataavailable = (e) => {
+  let framesGuard = null;
+  let rafActive = false;
+
+  const markFramesFlowing = () => {
+    if (telemetry.framesFlowing) return;
+    telemetry.framesFlowing = true;
+    telemetry.framesAt = performance.now();
+    telemetry.stage = 'frames_flowing';
+    window.__RECORDER_STATE__ = telemetry;
+    if (framesGuard) clearTimeout(framesGuard);
+    waitForFramesResolve(true);
+  };
+
+  const pumpFrames = () => {
+    if (!rafActive) return;
+    telemetry.frameCount += 1;
+    try { track.requestFrame?.(); } catch (_) {}
+    requestAnimationFrame(() => {
+      markFramesFlowing();
+      pumpFrames();
+    });
+  };
+
+  rec.addEventListener('dataavailable', (e) => {
     if (e.data && e.data.size) chunks.push(e.data);
-  };
-  rec.onstart = () => {
-    startedAt = performance.now();
-    chunks.length = 0;
-  };
+  });
 
-  return { rec, chunks, mimeType, getStartedMs: () => startedAt };
+  rec.addEventListener('start', () => {
+    telemetry.startedAt = performance.now();
+    telemetry.stage = 'recording';
+    telemetry.framesFlowing = false;
+    window.__RECORDER_STATE__ = telemetry;
+    chunks.length = 0;
+    rafActive = true;
+    requestAnimationFrame(markFramesFlowing);
+    framesGuard = setTimeout(() => {
+      if (!telemetry.framesFlowing) {
+        console.error('MediaRecorder: кадры не стартовали за отведённое время');
+        waitForFramesResolve(false);
+      }
+    }, 2000);
+    pumpFrames();
+  });
+
+  rec.addEventListener('stop', () => {
+    rafActive = false;
+    telemetry.stoppedAt = performance.now();
+    telemetry.stage = 'stopped';
+    window.__RECORDER_STATE__ = telemetry;
+  });
+
+  return { rec, chunks, mimeType, telemetry, waitForFrames };
 }
 
 export async function stopAndDownload(recCtx, outName, { finalDelayMs = 300 } = {}) {
-  const { rec, chunks, mimeType, getStartedMs } = recCtx;
+  const { rec, chunks, mimeType, telemetry } = recCtx;
+  telemetry.stage = 'export_requested';
+  telemetry.exportedAt = performance.now();
+  window.__RECORDER_STATE__ = telemetry;
+
   await new Promise((r) => setTimeout(r, finalDelayMs));
 
   const done = new Promise((resolve) => {
     rec.onstop = async () => {
-      const recordedMs = Math.max(0, performance.now() - getStartedMs());
+      const recordedMs = Math.max(0, (telemetry.startedAt && telemetry.stoppedAt)
+        ? telemetry.stoppedAt - telemetry.startedAt
+        : performance.now() - (telemetry.startedAt || performance.now()));
       const raw = new Blob(chunks, { type: mimeType });
 
       let fixedBlob = raw;
@@ -50,7 +148,13 @@ export async function stopAndDownload(recCtx, outName, { finalDelayMs = 300 } = 
         console.warn('webmDurationFix failed, fallback to raw blob', e);
       }
 
+      telemetry.stage = 'blob_ready';
+      window.__RECORDER_STATE__ = telemetry;
+
       downloadBlob(fixedBlob, outName);
+      telemetry.stage = 'saved';
+      telemetry.savedAt = performance.now();
+      window.__RECORDER_STATE__ = telemetry;
       resolve(fixedBlob);
     };
   });

@@ -5,6 +5,8 @@ from pathlib import Path
 
 from playwright.sync_api import Browser, Download, Page, sync_playwright
 
+from app.render import DISABLE_MEDIA_DEVICES
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HTML_ROOT = REPO_ROOT / "html"
@@ -35,6 +37,7 @@ class ExportTestCaseMixin:
 
     def make_page(self) -> Page:
         context = self.browser.new_context(accept_downloads=True)
+        context.add_init_script(DISABLE_MEDIA_DEVICES)
         self.addCleanup(context.close)
         page = context.new_page()
         return page
