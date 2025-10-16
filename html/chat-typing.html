@@ -68,10 +68,11 @@
 
   <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
 
-<script>
+<script type="module">
+import { startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
+
 /* ---------- Утилиты ---------- */
 const $=id=>document.getElementById(id);
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function setStatus(s){ const el=$('status'); if(el) el.textContent=s; }
 
 /* ---------- Markdown → строки (очень простой) ---------- */
@@ -289,67 +290,85 @@ function step(cfg, st, dt){
 
 /* ---------- Предпросмотр ---------- */
 let running=false, afId=0;
+
+function animateTyping(cfg, st, shouldContinue = () => true){
+  return new Promise((resolve) => {
+    const finish = () => {
+      afId = 0;
+      resolve();
+    };
+    let last = performance.now();
+    const stepFrame = (now) => {
+      if (!shouldContinue()) { finish(); return; }
+      const dt = now - last;
+      last = now;
+      step(cfg, st, dt);
+      renderFrame(cfg, st);
+      if (st.phase === 'done') {
+        finish();
+        return;
+      }
+      afId = requestAnimationFrame(stepFrame);
+    };
+    renderFrame(cfg, st);
+    afId = requestAnimationFrame((ts) => {
+      last = ts;
+      stepFrame(ts);
+    });
+  });
+}
+
 function runPreview(){
   if (running) return;
-  running=true; window.__CLIP_DONE__=false; setStatus('Предпросмотр…');
+  running=true;
+  window.__CLIP_DONE__=false;
+  setStatus('Предпросмотр…');
 
-  const cfg=getCfg(); const st=buildState(cfg);
-  let last=performance.now();
-  function loop(ts){
-    if (!running) return;
-    const dt = ts - last; last = ts;
-    step(cfg, st, dt);
-    renderFrame(cfg, st);
-    if (st.phase==='done'){
-      running=false; window.__CLIP_DONE__=true;
+  const cfg=getCfg();
+  const st=buildState(cfg);
+  animateTyping(cfg, st, () => running).then(() => {
+    if (running) {
+      window.__CLIP_DONE__=true;
       setStatus('Готово');
-      return;
     }
-    afId = requestAnimationFrame(loop);
-  }
-  afId = requestAnimationFrame(t=>{ last=t; loop(t); });
+    running=false;
+  }).catch((e)=>{
+    console.error(e);
+    setStatus('Ошибка предпросмотра: '+e.message);
+    running=false;
+  });
 }
 
 /* ---------- Экспорт ---------- */
-async function runExport(){
+async function performExport(){
   if (running) return;
-  running=true; window.__CLIP_DONE__=false; setStatus('Экспорт…');
-  const cfg=getCfg(); const st=buildState(cfg);
-
-  const stream=cv.captureStream(cfg.fps||30);
-  const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
-             : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm');
-  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
-  const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-  const done=new Promise(res=>rec.onstop=res);
-
-  rec.start();
-  const iv = 1000/(cfg.fps||30);
-  let stop=false;
-  (async ()=>{
-    while(!stop){
-      step(cfg, st, iv);
-      renderFrame(cfg, st);
-      if (st.phase==='done') break;
-      await sleep(iv);
-    }
-    // пару кадров «задержки»
-    for(let i=0;i<Math.round((cfg.fps||30)*0.5);i++){ renderFrame(cfg, st); await sleep(iv); }
-    rec.stop();
-  })();
-
-  await done; stop=true;
-  const blob=new Blob(chunks,{type:mime});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='chat_typing.webm';
-  document.body.appendChild(a); a.click(); a.remove();
-  setStatus('Скачан chat_typing.webm');
-  running=false; window.__CLIP_DONE__=true;
+  running=true;
+  window.__CLIP_DONE__=false;
+  setStatus('Экспорт…');
+  $('exportBtn').disabled=true;
+  try{
+    const cfg=getCfg();
+    const st=buildState(cfg);
+    renderFrame(cfg, st);
+    const recCtx = startRecorder(cv, { fps: cfg.fps || 30, vbr: 5_000_000 });
+    recCtx.rec.start();
+    await animateTyping(cfg, st, () => running);
+    await new Promise((r) => setTimeout(r, 300));
+    await stopAndDownload(recCtx, 'chat_typing.webm', { finalDelayMs: 300 });
+    setStatus('Скачан chat_typing.webm');
+    window.__CLIP_DONE__=true;
+  }catch(e){
+    console.error(e);
+    setStatus('Ошибка экспорта: '+e.message);
+  } finally{
+    running=false;
+    $('exportBtn').disabled=false;
+  }
 }
 
 /* ---------- Привязка UI ---------- */
 $('previewBtn').addEventListener('click', runPreview);
-$('exportBtn').addEventListener('click', runExport);
+bindGlobalExport(performExport);
 
 /* ---------- STATE из ?data= и авто-заполнение ---------- */
 (async () => {

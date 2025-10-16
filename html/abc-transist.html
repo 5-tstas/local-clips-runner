@@ -83,12 +83,12 @@
     <canvas id="stage" width="1280" height="720"></canvas>
   </div>
 
-<script>
+<script type="module">
+import { startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
+
 /* ===== Helpers ===== */
 const $ = id => document.getElementById(id);
 const canvas = $('stage'), ctx = canvas.getContext('2d', { alpha:false });
-
-function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
 
 function fileToURL(file){ return URL.createObjectURL(file); }
@@ -228,22 +228,40 @@ function getOpts(){
 }
 
 let previewRunning=false;
+
+function playTransition(imgs, opts, shouldContinue = () => true){
+  return new Promise((resolve) => {
+    const start = performance.now();
+    const totalMs = opts.total * 1000;
+    const frame = (now) => {
+      if (!shouldContinue()) { resolve(); return; }
+      const elapsed = now - start;
+      const t = Math.min(opts.total, elapsed / 1000);
+      drawFrame(t, imgs, opts);
+      if (elapsed >= totalMs) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(frame);
+    };
+    drawFrame(0, imgs, opts);
+    requestAnimationFrame(frame);
+  });
+}
+
 async function preview(){
   if(previewRunning) return;
+  previewRunning=true;
+  window.__CLIP_DONE__ = false;
   try{
-    previewRunning=true;
     $('status').textContent='Предпросмотр…';
     const imgs = await loadImages();
     const opts = getOpts();
-    const N = Math.round(opts.total * opts.fps);
-    for(let k=0;k<N;k++){
-      const t = k/opts.fps;
-      drawFrame(t, imgs, opts);
-      await sleep(1000/opts.fps);
-      if(!previewRunning) break;
+    await playTransition(imgs, opts, () => previewRunning);
+    if (previewRunning) {
+      window.__CLIP_DONE__ = true;
+      $('status').textContent='Готово';
     }
-    window.__CLIP_DONE__ = true;
-    $('status').textContent='Готово';
   } catch(e){
     console.error(e);
     $('status').textContent='Ошибка: ' + e.message;
@@ -252,36 +270,20 @@ async function preview(){
   }
 }
 
-async function exportWebM(){
+async function performExport(){
+  window.__CLIP_DONE__ = false;
+  $('exportBtn').disabled=true;
+  $('status').textContent='Экспорт WebM…';
   try{
-    $('exportBtn').disabled=true;
-    $('status').textContent='Экспорт WebM…';
     const imgs = await loadImages();
     const opts = getOpts();
-    const stream = canvas.captureStream(opts.fps);
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
-                : MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8'
-                : 'video/webm';
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
-    const chunks = [];
-    rec.ondataavailable = e=>{ if(e.data && e.data.size) chunks.push(e.data); };
-    const done = new Promise(res=> rec.onstop = res);
-    rec.start();
-
-    const N = Math.round(opts.total * opts.fps);
-    for(let k=0;k<N;k++){
-      const t = k/opts.fps;
-      drawFrame(t, imgs, opts);
-      await sleep(1000/opts.fps);
-    }
-    rec.stop();
-    await done;
-    const blob = new Blob(chunks, {type:mime});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'abc_transition.webm';
-    document.body.appendChild(a); a.click(); a.remove();
+    drawFrame(0, imgs, opts);
+    const recCtx = startRecorder(canvas, { fps: opts.fps, vbr: 5_000_000 });
+    recCtx.rec.start();
+    await playTransition(imgs, opts);
+    await stopAndDownload(recCtx, 'abc_transition.webm', { finalDelayMs: 300 });
     $('status').textContent = 'Готово: скачан WebM';
+    window.__CLIP_DONE__ = true;
   } catch(e){
     console.error(e);
     $('status').textContent='Экспорт не удался: '+e.message;
@@ -292,7 +294,7 @@ async function exportWebM(){
 
 /* Bindings */
 $('previewBtn').addEventListener('click', ()=>{ previewRunning=false; preview(); });
-$('exportBtn').addEventListener('click', exportWebM);
+bindGlobalExport(performExport);
 </script>
 <script>
 (async () => {

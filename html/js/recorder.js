@@ -12,7 +12,6 @@ export function pickWebmMime() {
 }
 
 export function startRecorder(canvas, { fps = 30, vbr = 5_000_000 } = {}) {
-  // гарантированный поток кадров
   const stream = canvas.captureStream?.(fps);
   if (!stream) throw new Error('canvas.captureStream() не поддерживается');
 
@@ -22,26 +21,29 @@ export function startRecorder(canvas, { fps = 30, vbr = 5_000_000 } = {}) {
   const chunks = [];
   let startedAt = 0;
 
-  rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  rec.onstart = () => { startedAt = performance.now(); };
+  rec.ondataavailable = (e) => {
+    if (e.data && e.data.size) chunks.push(e.data);
+  };
+  rec.onstart = () => {
+    startedAt = performance.now();
+    chunks.length = 0;
+  };
 
   return { rec, chunks, mimeType, getStartedMs: () => startedAt };
 }
 
-export async function stopAndDownload({ rec, chunks, mimeType, getStartedMs }, outName, { finalDelayMs = 300 } = {}) {
-  // небольшая задержка — гарантируем запись последнего кадра
-  await new Promise(r => setTimeout(r, finalDelayMs));
+export async function stopAndDownload(recCtx, outName, { finalDelayMs = 300 } = {}) {
+  const { rec, chunks, mimeType, getStartedMs } = recCtx;
+  await new Promise((r) => setTimeout(r, finalDelayMs));
 
   const done = new Promise((resolve) => {
     rec.onstop = async () => {
       const recordedMs = Math.max(0, performance.now() - getStartedMs());
       const raw = new Blob(chunks, { type: mimeType });
 
-      // Фикс длительности, если глобальный fixer доступен
       let fixedBlob = raw;
       try {
         if (typeof window.webmDurationFix === 'function') {
-          // ожидаемый интерфейс: webmDurationFix(blob, durationMs) -> Promise<Blob>
           fixedBlob = await window.webmDurationFix(raw, recordedMs);
         }
       } catch (e) {
@@ -57,7 +59,7 @@ export async function stopAndDownload({ rec, chunks, mimeType, getStartedMs }, o
   return await done;
 }
 
-export function downloadBlob(blob, filename) {
+export function downloadBlob(blob, filename = 'export.webm') {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -66,4 +68,14 @@ export function downloadBlob(blob, filename) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+export function bindGlobalExport(recCtxOrFn, outName = 'export.webm', options) {
+  if (typeof recCtxOrFn === 'function') {
+    window.exportWebM = recCtxOrFn;
+  } else {
+    window.exportWebM = async () => stopAndDownload(recCtxOrFn, outName, options);
+  }
+  const btn = document.querySelector('#exportBtn, #btnExport, #export');
+  if (btn) btn.addEventListener('click', () => window.exportWebM());
 }

@@ -1,0 +1,2 @@
+"""Chat typing Playwright tests."""
+
