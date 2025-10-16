@@ -12,8 +12,25 @@ export function pickWebmMime() {
 }
 
 export function startRecorder(canvas, { fps = 30, vbr = 5_000_000 } = {}) {
-  const stream = canvas.captureStream?.(fps);
-  if (!stream) throw new Error('canvas.captureStream() не поддерживается');
+  if (!(canvas instanceof HTMLCanvasElement)) {
+    throw new Error('startRecorder: ожидается HTMLCanvasElement');
+  }
+  if (typeof canvas.captureStream !== 'function') {
+    throw new Error('startRecorder: canvas.captureStream() недоступен');
+  }
+
+  const stream = canvas.captureStream(fps);
+  const [track] = stream.getVideoTracks();
+  if (!track) {
+    throw new Error('startRecorder: в потоке нет видеодорожки');
+  }
+  if (track.applyConstraints) {
+    try {
+      track.applyConstraints({ frameRate: fps });
+    } catch (err) {
+      console.warn('Не удалось зафиксировать frameRate', err);
+    }
+  }
 
   const mimeType = pickWebmMime();
   const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: vbr });

@@ -37,6 +37,17 @@ class ExportTestCaseMixin:
         context = self.browser.new_context(accept_downloads=True)
         self.addCleanup(context.close)
         page = context.new_page()
+        page.add_init_script(
+            """
+(() => {
+  const forbid = (name) => () => { throw new Error(`${name} is forbidden`); };
+  if (navigator.mediaDevices) {
+    navigator.mediaDevices.getDisplayMedia = forbid('displayMedia');
+    navigator.mediaDevices.getUserMedia = forbid('userMedia');
+  }
+})()
+"""
+        )
         return page
 
     def save_download(self, download: Download, name: str) -> Path:
