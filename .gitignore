@@ -215,3 +215,10 @@ html/*.webm
 Movies/
 ClipsRunner/
 
+# --- allow 3 PNGs for ABC test ---
+!samples/
+!samples/1_AgentKit-ot-OpenAI.png
+!samples/2_Prostaya-formulirovka-zadachi.png
+!samples/3_Klyuchevye-preimushchestva-AgentKit.png
+
+
