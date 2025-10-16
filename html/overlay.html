@@ -124,9 +124,13 @@
   <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
 </div>
 
-<script>
+<script type="module">
+import { startRecorder, bindGlobalExport } from './js/recorder.js';
+
 const W=1280,H=720, ctx=document.getElementById('cv').getContext('2d',{alpha:false});
 const $=id=>document.getElementById(id); const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const waitFrame = () => new Promise(res => requestAnimationFrame(res));
+const EXPORT_NAME = 'overlay_fullpanel_center.webm';
 function fontCSS({b,i,fs,font}){ let f=''; if(i) f+='italic '; if(b) f+='800 '; f+=fs+'px '+font; return f; }
 function drawUnderline(x,y,w,col,th=2){ ctx.save(); ctx.fillStyle=col; ctx.fillRect(x, y+4, w, th); ctx.restore(); }
 function measure(text,font){ ctx.save(); ctx.font=font; const w=ctx.measureText(text).width; ctx.restore(); return w; }
@@ -254,29 +258,55 @@ async function preview(){
   requestAnimationFrame(ts=>{ last=ts; frame(ts); });
 }
 
-async function exportWebM(){
-  if(running) return; running=true; $('exportBtn').disabled=true; $('status').textContent='Экспорт…';
+async function exportOverlay(){
+  if(running) return;
+  running=true;
+  const btn=$('exportBtn');
+  if(btn) btn.disabled=true;
+  $('status').textContent='Экспорт…';
   try{
-    const c=cfg(); const st=buildState(c);
-    const stream=document.getElementById('cv').captureStream(c.fps);
-    const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':
-               (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')?'video/webm;codecs=vp8':'video/webm');
-    const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
-    const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-    const done=new Promise(res=>rec.onstop=res); rec.start();
-    const dt=1000/(c.fps||30);
-    while(st.phase!=='done'){ step(st,c,dt); render(c,st); await sleep(dt); }
-    for(let i=0;i<Math.round(0.5*(c.fps||30));i++){ render(c,st); await sleep(dt); }
-    rec.stop(); await done;
-    const blob=new Blob(chunks,{type:mime}); const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download='overlay_fullpanel_center.webm'; document.body.appendChild(a); a.click(); a.remove();
-    $('status').textContent='Скачан overlay_fullpanel_center.webm';
-  }catch(e){ console.error(e); $('status').textContent='Ошибка экспорта: '+e.message; }
-  finally{ running=false; $('exportBtn').disabled=false; }
+    const c=cfg();
+    const st=buildState(c);
+    const canvas=document.getElementById('cv');
+    const fps=30;
+    const recCtx=startRecorder(canvas,{fps, vbr:5_000_000});
+    const finalize=bindGlobalExport(recCtx, EXPORT_NAME);
+
+    render(c,st);
+    const initialTs=await waitFrame();
+    recCtx.rec.start();
+    let last=initialTs;
+
+    while(st.phase!=='done'){
+      const now=await waitFrame();
+      const dt=now-last; last=now;
+      step(st,c,dt);
+      render(c,st);
+    }
+
+    const extra=Math.round(0.5*fps);
+    for(let i=0;i<extra;i++){
+      await waitFrame();
+      render(c,st);
+    }
+
+    await finalize();
+    $('status').textContent=`Скачан ${EXPORT_NAME}`;
+  }catch(e){
+    console.error(e);
+    $('status').textContent='Ошибка экспорта: '+(e?.message||e);
+  }finally{
+    window.exportWebM=exportOverlay;
+    running=false;
+    if(btn) btn.disabled=false;
+  }
 }
 
-$('previewBtn').addEventListener('click', preview);
-$('exportBtn').addEventListener('click', exportWebM);
+window.preview = preview;
+window.exportWebM = exportOverlay;
+
+$('previewBtn').addEventListener('click', () => window.preview());
+$('exportBtn').addEventListener('click', () => window.exportWebM());
 render(cfg(), buildState(cfg()));
 </script>
 <script>

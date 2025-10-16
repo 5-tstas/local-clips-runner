@@ -83,12 +83,16 @@
     <canvas id="stage" width="1280" height="720"></canvas>
   </div>
 
-<script>
+<script type="module">
+import { startRecorder, bindGlobalExport } from './js/recorder.js';
+
 /* ===== Helpers ===== */
 const $ = id => document.getElementById(id);
 const canvas = $('stage'), ctx = canvas.getContext('2d', { alpha:false });
 
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+const waitFrame = () => new Promise(res => requestAnimationFrame(res));
+const EXPORT_NAME = 'abc_transition.webm';
 function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
 
 function fileToURL(file){ return URL.createObjectURL(file); }
@@ -228,6 +232,7 @@ function getOpts(){
 }
 
 let previewRunning=false;
+let exportRunning=false;
 async function preview(){
   if(previewRunning) return;
   try{
@@ -252,47 +257,54 @@ async function preview(){
   }
 }
 
-async function exportWebM(){
+async function exportABC(){
+  if(exportRunning) return;
+  exportRunning=true;
+  const btn=$('exportBtn');
+  if(btn) btn.disabled=true;
+  $('status').textContent='Экспорт WebM…';
   try{
-    $('exportBtn').disabled=true;
-    $('status').textContent='Экспорт WebM…';
     const imgs = await loadImages();
     const opts = getOpts();
-    const stream = canvas.captureStream(opts.fps);
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
-                : MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8'
-                : 'video/webm';
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
-    const chunks = [];
-    rec.ondataavailable = e=>{ if(e.data && e.data.size) chunks.push(e.data); };
-    const done = new Promise(res=> rec.onstop = res);
-    rec.start();
+    const fps = 30;
+    const recCtx = startRecorder(canvas, { fps, vbr: 5_000_000 });
+    const finalize = bindGlobalExport(recCtx, EXPORT_NAME);
 
-    const N = Math.round(opts.total * opts.fps);
-    for(let k=0;k<N;k++){
-      const t = k/opts.fps;
+    drawFrame(0, imgs, opts);
+    await waitFrame();
+    recCtx.rec.start();
+
+    const totalFrames = Math.max(1, Math.round(opts.total * fps));
+    for(let k=0;k<totalFrames;k++){
+      const t = k / fps;
       drawFrame(t, imgs, opts);
-      await sleep(1000/opts.fps);
+      await sleep(1000 / fps);
     }
-    rec.stop();
-    await done;
-    const blob = new Blob(chunks, {type:mime});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'abc_transition.webm';
-    document.body.appendChild(a); a.click(); a.remove();
+
+    const extra = Math.round(0.3 * fps);
+    for(let i=0;i<extra;i++){
+      await sleep(1000 / fps);
+      drawFrame(opts.total, imgs, opts);
+    }
+
+    await finalize();
     $('status').textContent = 'Готово: скачан WebM';
   } catch(e){
     console.error(e);
-    $('status').textContent='Экспорт не удался: '+e.message;
+    $('status').textContent='Экспорт не удался: '+(e?.message||e);
   } finally{
-    $('exportBtn').disabled=false;
+    window.exportWebM = exportABC;
+    exportRunning=false;
+    if(btn) btn.disabled=false;
   }
 }
 
+window.preview = preview;
+window.exportWebM = exportABC;
+
 /* Bindings */
-$('previewBtn').addEventListener('click', ()=>{ previewRunning=false; preview(); });
-$('exportBtn').addEventListener('click', exportWebM);
+$('previewBtn').addEventListener('click', ()=>{ previewRunning=false; window.preview(); });
+$('exportBtn').addEventListener('click', () => window.exportWebM());
 </script>
 <script>
 (async () => {

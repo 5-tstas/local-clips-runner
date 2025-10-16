@@ -68,10 +68,14 @@
 
   <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
 
-<script>
+<script type="module">
+import { startRecorder, bindGlobalExport } from './js/recorder.js';
+
 /* ---------- Утилиты ---------- */
 const $=id=>document.getElementById(id);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const waitFrame = () => new Promise(res => requestAnimationFrame(res));
+const EXPORT_NAME = 'chat_typing.webm';
 function setStatus(s){ const el=$('status'); if(el) el.textContent=s; }
 
 /* ---------- Markdown → строки (очень простой) ---------- */
@@ -315,37 +319,46 @@ async function runExport(){
   if (running) return;
   running=true; window.__CLIP_DONE__=false; setStatus('Экспорт…');
   const cfg=getCfg(); const st=buildState(cfg);
+  const btn=$('exportBtn');
+  if (btn) btn.disabled=true;
 
-  const stream=cv.captureStream(cfg.fps||30);
-  const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
-             : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm');
-  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
-  const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-  const done=new Promise(res=>rec.onstop=res);
+  try {
+    const fps = 30;
+    const recCtx = startRecorder(cv, { fps, vbr: 5_000_000 });
+    const finalize = bindGlobalExport(recCtx, EXPORT_NAME);
 
-  rec.start();
-  const iv = 1000/(cfg.fps||30);
-  let stop=false;
-  (async ()=>{
-    while(!stop){
-      step(cfg, st, iv);
+    renderFrame(cfg, st);
+    let last = await waitFrame();
+    recCtx.rec.start();
+
+    while(running && st.phase!=='done'){
+      const now = await waitFrame();
+      const dt = now - last; last = now;
+      step(cfg, st, dt);
       renderFrame(cfg, st);
-      if (st.phase==='done') break;
-      await sleep(iv);
     }
-    // пару кадров «задержки»
-    for(let i=0;i<Math.round((cfg.fps||30)*0.5);i++){ renderFrame(cfg, st); await sleep(iv); }
-    rec.stop();
-  })();
 
-  await done; stop=true;
-  const blob=new Blob(chunks,{type:mime});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='chat_typing.webm';
-  document.body.appendChild(a); a.click(); a.remove();
-  setStatus('Скачан chat_typing.webm');
-  running=false; window.__CLIP_DONE__=true;
+    const extra = Math.round(0.3 * fps);
+    for(let i=0;i<extra;i++){
+      await waitFrame();
+      renderFrame(cfg, st);
+    }
+
+    await finalize();
+    setStatus('Скачан chat_typing.webm');
+    window.__CLIP_DONE__=true;
+  } catch(e){
+    console.error(e);
+    setStatus('Экспорт не удался: ' + (e?.message||e));
+  } finally {
+    window.exportWebM = runExport;
+    running=false;
+    if (btn) btn.disabled=false;
+  }
 }
+
+window.runPreview = runPreview;
+window.exportWebM = runExport;
 
 /* ---------- Привязка UI ---------- */
 $('previewBtn').addEventListener('click', runPreview);
