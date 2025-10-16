@@ -84,7 +84,10 @@
   </div>
 
 <script type="module">
-import { startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
+import { startRecorder, stopAndDownload, bindGlobalExport, markStage } from './js/recorder.js';
+
+markStage('goto', { page: 'abc', href: location.href });
+markStage('init', { page: 'abc' });
 
 /* ===== Helpers ===== */
 const $ = id => document.getElementById(id);
@@ -229,7 +232,15 @@ function getOpts(){
 
 let previewRunning=false;
 
-function playTransition(imgs, opts, shouldContinue = () => true){
+function playTransition(imgs, opts, maybeOptions){
+  let shouldContinue = () => true;
+  let onFrame;
+  if (typeof maybeOptions === 'function') {
+    shouldContinue = maybeOptions;
+  } else if (maybeOptions && typeof maybeOptions === 'object') {
+    shouldContinue = maybeOptions.shouldContinue || shouldContinue;
+    onFrame = maybeOptions.onFrame;
+  }
   return new Promise((resolve) => {
     const start = performance.now();
     const totalMs = opts.total * 1000;
@@ -238,6 +249,9 @@ function playTransition(imgs, opts, shouldContinue = () => true){
       const elapsed = now - start;
       const t = Math.min(opts.total, elapsed / 1000);
       drawFrame(t, imgs, opts);
+      if (onFrame) {
+        try { onFrame({ elapsedMs: elapsed, t }); } catch (err) { console.error(err); }
+      }
       if (elapsed >= totalMs) {
         resolve();
         return;
@@ -245,6 +259,9 @@ function playTransition(imgs, opts, shouldContinue = () => true){
       requestAnimationFrame(frame);
     };
     drawFrame(0, imgs, opts);
+    if (onFrame) {
+      try { onFrame({ elapsedMs: 0, t: 0 }); } catch (err) { console.error(err); }
+    }
     requestAnimationFrame(frame);
   });
 }
@@ -257,7 +274,9 @@ async function preview(){
     $('status').textContent='Предпросмотр…';
     const imgs = await loadImages();
     const opts = getOpts();
-    await playTransition(imgs, opts, () => previewRunning);
+    await playTransition(imgs, opts, {
+      shouldContinue: () => previewRunning,
+    });
     if (previewRunning) {
       window.__CLIP_DONE__ = true;
       $('status').textContent='Готово';
@@ -280,7 +299,11 @@ async function performExport(){
     drawFrame(0, imgs, opts);
     const recCtx = startRecorder(canvas, { fps: opts.fps, vbr: 5_000_000 });
     recCtx.rec.start();
-    await playTransition(imgs, opts);
+    recCtx.noteFrame({ page: 'abc', stage: 'prime' });
+    await playTransition(imgs, opts, {
+      shouldContinue: () => true,
+      onFrame: ({ t }) => recCtx.noteFrame({ page: 'abc', t }),
+    });
     await stopAndDownload(recCtx, 'abc_transition.webm', { finalDelayMs: 300 });
     $('status').textContent = 'Готово: скачан WebM';
     window.__CLIP_DONE__ = true;

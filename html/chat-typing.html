@@ -69,7 +69,10 @@
   <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
 
 <script type="module">
-import { startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
+import { startRecorder, stopAndDownload, bindGlobalExport, markStage } from './js/recorder.js';
+
+markStage('goto', { page: 'chat', href: location.href });
+markStage('init', { page: 'chat' });
 
 /* ---------- Утилиты ---------- */
 const $=id=>document.getElementById(id);
@@ -291,7 +294,15 @@ function step(cfg, st, dt){
 /* ---------- Предпросмотр ---------- */
 let running=false, afId=0;
 
-function animateTyping(cfg, st, shouldContinue = () => true){
+function animateTyping(cfg, st, maybeOptions){
+  let shouldContinue = () => true;
+  let onFrame;
+  if (typeof maybeOptions === 'function') {
+    shouldContinue = maybeOptions;
+  } else if (maybeOptions && typeof maybeOptions === 'object') {
+    shouldContinue = maybeOptions.shouldContinue || shouldContinue;
+    onFrame = maybeOptions.onFrame;
+  }
   return new Promise((resolve) => {
     const finish = () => {
       afId = 0;
@@ -304,6 +315,9 @@ function animateTyping(cfg, st, shouldContinue = () => true){
       last = now;
       step(cfg, st, dt);
       renderFrame(cfg, st);
+      if (onFrame) {
+        try { onFrame({ now, dt, state: st }); } catch (err) { console.error(err); }
+      }
       if (st.phase === 'done') {
         finish();
         return;
@@ -311,6 +325,9 @@ function animateTyping(cfg, st, shouldContinue = () => true){
       afId = requestAnimationFrame(stepFrame);
     };
     renderFrame(cfg, st);
+    if (onFrame) {
+      try { onFrame({ now: performance.now(), dt: 0, state: st }); } catch (err) { console.error(err); }
+    }
     afId = requestAnimationFrame((ts) => {
       last = ts;
       stepFrame(ts);
@@ -326,7 +343,9 @@ function runPreview(){
 
   const cfg=getCfg();
   const st=buildState(cfg);
-  animateTyping(cfg, st, () => running).then(() => {
+  animateTyping(cfg, st, {
+    shouldContinue: () => running,
+  }).then(() => {
     if (running) {
       window.__CLIP_DONE__=true;
       setStatus('Готово');
@@ -352,7 +371,11 @@ async function performExport(){
     renderFrame(cfg, st);
     const recCtx = startRecorder(cv, { fps: cfg.fps || 30, vbr: 5_000_000 });
     recCtx.rec.start();
-    await animateTyping(cfg, st, () => running);
+    recCtx.noteFrame({ page: 'chat', stage: 'prime' });
+    await animateTyping(cfg, st, {
+      shouldContinue: () => running,
+      onFrame: () => recCtx.noteFrame({ page: 'chat' }),
+    });
     await new Promise((r) => setTimeout(r, 300));
     await stopAndDownload(recCtx, 'chat_typing.webm', { finalDelayMs: 300 });
     setStatus('Скачан chat_typing.webm');

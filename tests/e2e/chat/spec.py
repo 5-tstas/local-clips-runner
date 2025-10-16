@@ -28,13 +28,19 @@ class TestChatSpec(ExportTestCaseMixin, unittest.TestCase):
         with page.expect_download() as download_info:
             page.click("#exportBtn")
         download = download_info.value
+        self.assertIsNone(download.failure())
 
         saved = self.save_download(download, "chat-typing.webm")
 
         frame_count = page.evaluate("window.__FRAME_COUNT__ || 0")
         self.assertGreater(frame_count, 30, "expected animation to render multiple frames")
 
-        verify_webm(saved)
+        info = verify_webm(saved)
+
+        timeline = self.fetch_timeline(page)
+        self.assert_stage_sequence(timeline)
+        self.assert_no_banned_calls(page)
+        self.record_summary('chat', saved, info, timeline)
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience

@@ -125,7 +125,10 @@
 </div>
 
 <script type="module">
-import { startRecorder, stopAndDownload, bindGlobalExport } from './js/recorder.js';
+import { startRecorder, stopAndDownload, bindGlobalExport, markStage } from './js/recorder.js';
+
+markStage('goto', { page: 'overlay', href: location.href });
+markStage('init', { page: 'overlay' });
 
 const W=1280,H=720;
 const canvas=document.getElementById('cv');
@@ -248,7 +251,8 @@ function step(st,c,dt){
 
 let running=false;
 
-function runClipWithRaf(c, st){
+function runClipWithRaf(c, st, opts = {}){
+  const { onFrame } = opts;
   return new Promise((resolve) => {
     let lastTs = performance.now();
     const stepFrame = (now) => {
@@ -257,6 +261,9 @@ function runClipWithRaf(c, st){
       lastTs = now;
       step(st, c, dt);
       render(c, st);
+      if (onFrame) {
+        try { onFrame({ now, dt, state: st }); } catch(e) { console.error(e); }
+      }
       if (st.phase === 'done') {
         resolve();
         return;
@@ -264,6 +271,9 @@ function runClipWithRaf(c, st){
       requestAnimationFrame(stepFrame);
     };
     render(c, st);
+    if (onFrame) {
+      try { onFrame({ now: performance.now(), dt: 0, state: st }); } catch(e) { console.error(e); }
+    }
     requestAnimationFrame((ts) => {
       lastTs = ts;
       requestAnimationFrame(stepFrame);
@@ -305,7 +315,10 @@ async function performExport(){
     const fps = c.fps || 30;
     const recCtx = startRecorder(canvas, { fps, vbr: 5_000_000 });
     recCtx.rec.start();
-    await runClipWithRaf(c, st);
+    recCtx.noteFrame({ page: 'overlay', stage: 'prime' });
+    await runClipWithRaf(c, st, {
+      onFrame: () => recCtx.noteFrame({ page: 'overlay' }),
+    });
     await stopAndDownload(recCtx, 'overlay_fullpanel_center.webm', { finalDelayMs: 300 });
     $('status').textContent='Скачан overlay_fullpanel_center.webm';
     window.__CLIP_DONE__=true;

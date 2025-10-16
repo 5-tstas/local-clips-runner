@@ -15,9 +15,15 @@ class TestABCSpec(ExportTestCaseMixin, unittest.TestCase):
         with page.expect_download() as download_info:
             page.evaluate("window.exportWebM()")
         download = download_info.value
+        self.assertIsNone(download.failure())
 
         saved = self.save_download(download, "abc-transist.webm")
-        verify_webm(saved)
+        info = verify_webm(saved)
+
+        timeline = self.fetch_timeline(page)
+        self.assert_stage_sequence(timeline)
+        self.assert_no_banned_calls(page)
+        self.record_summary('abc', saved, info, timeline)
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience
