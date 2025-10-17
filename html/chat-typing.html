@@ -3,386 +3,495 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Chat Typing — Markdown → печать, предпросмотр и экспорт WebM</title>
+<title>Chat Typing Simulator v7 — + Plain→Markdown</title>
 <style>
-  :root{--accent:#3aa3ff;--ui:#0f141b;--line:#1e2a36;--bg:#0b0f13}
-  html,body{height:100%}
-  body{margin:0;background:var(--bg);color:#e8edf2;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-       display:flex;flex-direction:column;align-items:center;gap:14px;padding:16px}
-  .panel{background:var(--ui);border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;
-         grid-template-columns:repeat(12,1fr);gap:10px;max-width:1280px;width:100%}
-  .group{border:1px solid var(--line);border-radius:10px;padding:10px;grid-column:span 12}
+  :root{--accent:#3aa3ff}
+  body{margin:0;background:#0b0f13;color:#e8edf2;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;display:flex;flex-direction:column;align-items:center;gap:14px;padding:16px}
+  .panel{background:#0f141b;border:1px solid #1e2a36;border-radius:12px;padding:12px;display:grid;grid-template-columns:repeat(12,1fr);gap:10px;max-width:1280px;width:100%}
+  .panel>*{min-width:0}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   label{font-size:13px;color:#c9d6e2}
-  input,textarea,select{background:#0b0f13;color:#e8edf2;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:14px}
+  input,textarea,select{background:#0b0f13;color:#e8edf2;border:1px solid #1e2a36;border-radius:8px;padding:8px;font-size:14px}
+  input[type="file"]{padding:6px}
   textarea{width:100%}
-  input[type="number"]{width:90px}
   button{background:var(--accent);color:#001222;border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
   button:disabled{opacity:.6;cursor:not-allowed}
   .status{grid-column:span 12;color:#9bd1ff;font-size:13px}
-  .stage{width:1280px;max-width:calc(100vw - 32px);aspect-ratio:16/9;background:#000;border-radius:12px;
-         box-shadow:0 0 0 1px var(--line),0 12px 40px rgba(0,0,0,.5);overflow:hidden}
+  .hint{color:#9aa7b4;font-size:12px}
+  .stage{width:1280px;max-width:calc(100vw - 32px);aspect-ratio:16/9;background:#000;border-radius:12px;box-shadow:0 0 0 1px #1e2a36,0 12px 40px rgba(0,0,0,.5);overflow:hidden}
   canvas{width:100%;height:100%;display:block}
+  .group{border:1px solid #1e2a36;border-radius:10px;padding:10px}
   .title{font-weight:700;color:#cfe6ff}
 </style>
 <!-- общие утилиты записи WebM -->
 <script type="module" src="./js/recorder.js"></script>
 <!-- опциональный фиксер длительности (даже заглушка не повредит) -->
 <script src="./vendor/webm-duration-fix.min.js"></script>
-
 </head>
 <body>
   <div class="panel">
-    <div class="group">
+    <!-- Основной ввод -->
+    <div class="group" style="grid-column:span 12">
       <div class="row">
         <label style="flex:1">Промт
           <input id="prompt" type="text" placeholder="Объясни простыми словами, как работает трансформер">
         </label>
-        <label>Скорость промта (симв/с) <input id="cpsPrompt" type="number" value="14" min="4" max="80"></label>
-        <label>«Думает» (сек) <input id="thinkSec" type="number" value="2" min="0" max="30"></label>
+        <label>Скорость промта (симв/с) <input id="cpsPrompt" type="number" value="14" min="4" max="80" style="width:90px"></label>
+        <label>«Думает» (сек) <input id="thinkSec" type="number" value="3" min="0" max="30" style="width:80px"></label>
       </div>
-      <label>Ответ (Markdown)
-        <textarea id="answer" rows="8" placeholder="# Заголовок
-## Подзаголовок
-- Пункт 1
-- **Жирный** и *курсив*
-Текст с `кодом` и [ссылкой](https://example.com)"></textarea>
+      <label>Ответ (Markdown: # заголовок, ## подзаголовок, пустая строка — абзац, -/1. — списки)
+        <textarea id="answer" rows="7"># Блок 4 — «золотой промт»
+## Схема
+Логика: шаг 1 — анализ входа… шаг 5 — шлифовка.
+
+- Убрать предсказуемость
+- Добавить выразительность
+- Проверить стоп-слова</textarea>
       </label>
       <div class="row">
-        <label>Скорость ответа (симв/с) <input id="cpsAnswer" type="number" value="20" min="4" max="120"></label>
-        <label>Пауза после . ! ? … (мс) <input id="pauseSentence" type="number" value="220" min="0" max="1500"></label>
-        <label>Пауза после , ; : (мс) <input id="pauseComma" type="number" value="110" min="0" max="1000"></label>
+        <label>Скорость ответа (симв/с) <input id="cpsAnswer" type="number" value="20" min="4" max="120" style="width:90px"></label>
+        <label>Пауза после . ! ? … (мс) <input id="pauseSentence" type="number" value="220" min="0" max="1000" style="width:90px"></label>
+        <label>Пауза после , ; : (мс) <input id="pauseComma" type="number" value="110" min="0" max="800" style="width:90px"></label>
         <label>FPS <input id="fps" type="number" value="30" min="15" max="60" style="width:70px"></label>
-        <label class="row" style="gap:6px"><input id="soundOn" type="checkbox"> Включить «тап-тап»</label>
       </div>
     </div>
 
-    <div class="group">
+    <!-- Конвертер текст → Markdown -->
+    <div class="group" style="grid-column:span 12">
+      <div class="row"><span class="title">Конвертер: Вставь текст → Markdown</span></div>
+      <textarea id="plain" rows="6" placeholder="Вставь обычный текст. Короткие строки станут подзаголовками, строки с «-», «—», «–», «•» превратятся в маркеры, строки вида 1. / 1) — в пронумерованные."></textarea>
       <div class="row">
-        <button id="previewBtn">▶︎ Предпросмотр</button>
-        <button id="exportBtn">● Экспорт WebM</button>
+        <label class="row" style="gap:6px"><input id="optH1First" type="checkbox" checked> Первая непустая строка = заголовок (#)</label>
+        <label class="row" style="gap:6px"><input id="optAutoH2" type="checkbox" checked> Короткие строки (≤60 симв., без точки) = подзаголовки (##)</label>
+        <label class="row" style="gap:6px"><input id="optBullets" type="checkbox" checked> Преобразовывать маркеры (-, —, –, •)</label>
+        <label class="row" style="gap:6px"><input id="optOrdered" type="checkbox" checked> Преобразовывать числовые списки (1., 1))</label>
       </div>
-      <div class="status" id="status">Готово</div>
+      <div class="row">
+        <button id="toMdBtn">↻ Конвертировать и вставить в «Ответ»</button>
+        <span class="hint">Конвертер аккуратно склеивает строки в абзацы до пустой строки.</span>
+      </div>
     </div>
+
+    <!-- Аватарки + звук -->
+    <div class="group" style="grid-column:span 12">
+      <div class="row"><span class="title">Аватарки и звук</span></div>
+      <div class="row">
+        <label>Аватар ИИ: <input id="aiAvatar" type="file" accept="image/*"></label>
+        <label>Аватар Вы: <input id="youAvatar" type="file" accept="image/*"></label>
+        <label>Размер аватара (px) <input id="avaSize" type="number" value="42" min="28" max="80" style="width:80px"></label>
+      </div>
+      <div class="row">
+        <label class="row" style="gap:6px"><input id="soundOn" type="checkbox" checked> Включить «тап-тап»</label>
+        <label>Громкость <input id="soundVol" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+        <span class="hint">Звук слышен в предпросмотре и пишется в WebM при экспорте.</span>
+      </div>
+    </div>
+
+    <!-- Шрифты -->
+    <div class="group" style="grid-column:span 12">
+      <div class="row"><span class="title">Кастомные шрифты</span></div>
+      <div class="row">
+        <label>UI font-family <input id="uiFont" type="text" value="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial" style="width:440px"></label>
+        <label>Chat font-family <input id="chatFont" type="text" value="Inter, system-ui, -apple-system, Segoe UI, Arial" style="width:440px"></label>
+      </div>
+      <div class="row">
+        <label>Google Fonts CSS URL <input id="gfUrl" type="text" placeholder="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap" style="width:640px"></label>
+        <button id="loadFonts">Подключить шрифты</button>
+        <span class="hint">Скопируй URL из «Импорт» на fonts.google.com, нажми «Подключить» и дождись «Готово».</span>
+      </div>
+    </div>
+
+    <!-- Кнопки -->
+    <div style="grid-column:span 12" class="row">
+      <button id="previewBtn">▶︎ Предпросмотр</button>
+      <button id="exportBtn">● Экспорт WebM</button>
+      <span class="hint">Экспорт без диалога: canvas.captureStream + MediaRecorder (1280×720).</span>
+    </div>
+
+    <div class="status" id="status">Готово</div>
   </div>
 
   <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
 
 <script>
-/* ---------- Утилиты ---------- */
+/* ===== базовая графика и утилиты ===== */
+const W=1280,H=720, TOP=44, BOT=64;
+const ctx = document.getElementById('cv').getContext('2d',{alpha:false});
 const $=id=>document.getElementById(id);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-function setStatus(s){ const el=$('status'); if(el) el.textContent=s; }
-
-/* ---------- Markdown → строки (очень простой) ---------- */
-function mdToBlocks(md){
-  const lines=(md||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
-  const out=[];
-  let i=0, num=1;
-  for (const raw of lines){
-    let line=raw.trimEnd();
-    if (!line){ out.push({type:'sp',text:''}); continue; }
-    if (line.startsWith('```')) { out.push({type:'codeFence',text:'‒‒‒ code ‒‒‒'}); continue; }
-    if (line.startsWith('## ')){ out.push({type:'h2', text:line.slice(3)}); continue; }
-    if (line.startsWith('# ')) { out.push({type:'h1', text:line.slice(2)}); continue; }
-    if (/^(\-|\*)\s+/.test(line)){ out.push({type:'ul', text:line.replace(/^(\-|\*)\s+/, '')}); continue; }
-    if (/^\d+[.)]\s+/.test(line)){ out.push({type:'ol', text:line.replace(/^\d+[.)]\s+/, '') , idx:num++}); continue; }
-    // inline: **b**, *i*, `code`, [text](url) → упростим до текста
-    line=line.replace(/\*\*(.+?)\*\*/g,'$1').replace(/\*(.+?)\*/g,'$1').replace(/`(.+?)`/g,'$1').replace(/\[(.+?)\]\((.+?)\)/g,'$1');
-    out.push({type:'p', text:line});
-  }
+const lerp=(a,b,t)=>a+(b-a)*t;
+function setStatus(t){ $('status').textContent=t; }
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function measureWrap(text,font,maxW){
+  ctx.save(); ctx.font=font; ctx.textBaseline='top';
+  const words=text.split(/\s+/); const lines=[]; let cur='';
+  for(const w of words){ const test=cur?cur+' '+w:w; if(ctx.measureText(test).width<=maxW) cur=test; else { if(cur) lines.push(cur); cur=w; } }
+  if(cur) lines.push(cur); ctx.restore(); return lines;
+}
+function buildIntervals(text,cps,pS,pC){
+  const base=1000/Math.max(1,cps), out=[];
+  for(const ch of text){ let t=base; if(/[.!?…]/.test(ch)) t+=pS; else if(/[,;:]/.test(ch)) t+=pC; out.push(t); }
   return out;
 }
 
-/* ---------- Разметка/рендер чата ---------- */
-const W=1280,H=720; const cv=$('cv'); const ctx=cv.getContext('2d',{alpha:false});
-function bubble(ctx,x,y,w,txtLines,style){
-  // стиль
-  ctx.save();
-  const pad=16, r=16;
-  // фон пузыря
-  ctx.fillStyle=style.bg;
-  roundRect(ctx,x,y,w,style.boxH,r); ctx.fill();
-  // текст
-  ctx.fillStyle=style.color; ctx.textBaseline='top';
-  let yy=y+pad, maxW=w-2*pad;
-  for(const ln of txtLines){
-    ctx.font = fontFor(ln.type, style);
-    const chunks = wrap(ln.render, ctx, maxW);
-    for(const ch of chunks){ ctx.fillText(ch, x+pad, yy); yy+=lineHeightFor(ln.type, style); }
-  }
+/* ===== аудио «тап-тап» ===== */
+let audioCtx=null, masterGain=null, clickBuffer=null, recDest=null;
+function initAudio(){
+  if(audioCtx) return;
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = +$('soundOn').checked ? +$('soundVol').value : 0;
+  masterGain.connect(audioCtx.destination);
+  // click
+  const dur=0.035, sr=audioCtx.sampleRate; clickBuffer = audioCtx.createBuffer(1, Math.floor(sr*dur), sr);
+  const d = clickBuffer.getChannelData(0);
+  for(let i=0;i<d.length;i++){ const t=i/sr, env=Math.exp(-t*50); d[i]=(Math.random()*2-1)*0.22*env + Math.sin(2*Math.PI*1200*t)*0.16*env; }
+}
+function playClick(){ if(!$('soundOn').checked) return; if(!audioCtx) initAudio(); const src=audioCtx.createBufferSource(); src.buffer=clickBuffer; const g=audioCtx.createGain(); g.gain.value=+$('soundVol').value; src.connect(g).connect(masterGain); src.start(); }
+$('soundOn').addEventListener('change',()=>{ if(!audioCtx) return; masterGain.gain.value = +$('soundOn').checked ? +$('soundVol').value : 0; });
+$('soundVol').addEventListener('input',()=>{ if(!audioCtx) initAudio(); masterGain.gain.value = +$('soundOn').checked ? +$('soundVol').value : 0; });
+
+/* ===== шрифты ===== */
+let uiFont=$('uiFont').value, chatFont=$('chatFont').value;
+$('loadFonts').addEventListener('click', async ()=>{
+  try{
+    const url=$('gfUrl').value.trim();
+    if(url){ let link=document.getElementById('gf-link'); if(!link){ link=document.createElement('link'); link.rel='stylesheet'; link.id='gf-link'; document.head.appendChild(link);} link.href=url; }
+    uiFont=$('uiFont').value; chatFont=$('chatFont').value;
+    await document.fonts.ready; setStatus('Шрифты подключены'); render(buildState(getCfg()), getCfg());
+  }catch(e){ setStatus('Не удалось подключить шрифты'); }
+});
+
+/* ===== аватарки ===== */
+let imgAI=null, imgYou=null;
+function loadAvatar(inputEl, cb){ const f=inputEl.files[0]; if(!f){cb(null);return;} const url=URL.createObjectURL(f); const im=new Image(); im.onload=()=>cb(im); im.src=url; }
+$('aiAvatar').addEventListener('change', e=>loadAvatar(e.target, im=>{imgAI=im;}));
+$('youAvatar').addEventListener('change', e=>loadAvatar(e.target, im=>{imgYou=im;}));
+function drawAvatar(img, x, y, size, label, color='#1f2937'){
+  const r=size/2; ctx.save(); ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.clip();
+  if(img) ctx.drawImage(img, x-r, y-r, size, size);
+  else { ctx.fillStyle=color; ctx.fillRect(x-r,y-r,size,size);
+         ctx.fillStyle='#e5eef8'; ctx.font=`700 ${Math.round(size*0.45)}px ${uiFont}`; ctx.textBaseline='middle';
+         const w=ctx.measureText(label).width; ctx.fillText(label, x-w/2, y); }
   ctx.restore();
 }
-function roundRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
-function fontFor(type, s){
-  if (type==='h1') return `700 ${Math.round(s.fs*1.35)}px ${s.font}`;
-  if (type==='h2') return `700 ${Math.round(s.fs*1.15)}px ${s.font}`;
-  if (type==='ul' || type==='ol') return `400 ${s.fs}px ${s.font}`;
-  return `400 ${s.fs}px ${s.font}`;
-}
-function lineHeightFor(type, s){
-  if (type==='h1') return Math.round(s.fs*1.6);
-  if (type==='h2') return Math.round(s.fs*1.4);
-  return Math.round(s.fs*1.35);
-}
-function wrap(text, ctx, maxW){
-  const words=(text||'').split(/\s+/); const out=[]; let cur='';
-  for(const w of words){
-    const t=cur?cur+' '+w:w;
-    if (ctx.measureText(t).width<=maxW) cur=t;
-    else{ if(cur) out.push(cur); cur=w; }
+
+/* ===== конвертер текст → Markdown ===== */
+function convertPlainToMarkdown(txt, opts){
+  const lines = txt.replace(/\r/g,'').split('\n');
+  const md = [];
+  let paragraph = [];
+  let usedH1 = !opts.h1First; // если опция выключена — сразу считаем, что заголовок уже был
+  const flushParagraph = ()=>{ if(paragraph.length){ md.push(paragraph.join(' ')); paragraph=[]; } };
+
+  const isBullet = s => /^[\s]*(?:[-–—•·])\s+/.test(s);
+  const normBullet = s => s.replace(/^[\s]*(?:[-–—•·])\s+/, '- ');
+  const isOrdered = s => /^[\s]*\d+[\.\)]\s+/.test(s);
+  const normOrdered = s => s.replace(/^[\s]*(\d+)[\.\)]\s+/, '$1. ');
+
+  for(let i=0;i<lines.length;i++){
+    let line = lines[i].trim();
+    if(!line){ flushParagraph(); md.push(''); continue; }
+
+    // bullets / ordered
+    if(opts.bullets && isBullet(line)){ flushParagraph(); md.push(normBullet(line)); continue; }
+    if(opts.ordered && isOrdered(line)){ flushParagraph(); md.push(normOrdered(line)); continue; }
+
+    // H1 (первая непустая строка)
+    if(!usedH1){ flushParagraph(); md.push('# ' + line); usedH1 = true; continue; }
+
+    // авто H2: короткая строка без финальной точки/воскл/вопроса
+    if(opts.autoH2 && line.length<=60 && !/[.!?…]$/.test(line)){
+      flushParagraph(); md.push('## ' + line); continue;
+    }
+
+    // иначе собираем абзац
+    paragraph.push(line);
   }
-  if(cur) out.push(cur);
-  return out;
+  flushParagraph();
+  // уберем лишние пустые строки в конце
+  while(md.length && md[md.length-1]==='') md.pop();
+  return md.join('\n');
+}
+$('toMdBtn').addEventListener('click', ()=>{
+  const md = convertPlainToMarkdown(
+    $('plain').value||'',
+    {h1First:$('optH1First').checked, autoH2:$('optAutoH2').checked, bullets:$('optBullets').checked, ordered:$('optOrdered').checked}
+  );
+  $('answer').value = md;
+  setStatus('Готово: Markdown вставлен в поле «Ответ».');
+});
+
+/* ===== парсер Markdown → сегменты (добавлены нумерованные списки) ===== */
+function mdToSegments(md){
+  const lines = md.split(/\n/);
+  const segs=[]; let cur=null;
+  for(const raw of lines){
+    const line = raw.replace(/\s+$/,'');
+    if(!line){ segs.push({type:'br'}); cur=null; continue; }
+    if(/^#\s+/.test(line)){ segs.push({type:'h1', text: line.replace(/^#\s+/,'')}); cur=null; continue; }
+    if(/^##\s+/.test(line)){ segs.push({type:'h2', text: line.replace(/^##\s+/,'')}); cur=null; continue; }
+    const mNum = line.match(/^\s*(\d+)[\.\)]\s+(.*)$/);
+    if(mNum){ segs.push({type:'ol', idx: +mNum[1], text: mNum[2]}); cur=null; continue; }
+    const mBul = line.match(/^\s*(?:[-–—•·])\s+(.*)$/);
+    if(mBul){ segs.push({type:'li', text: mBul[1]}); cur=null; continue; }
+    if(!cur){ cur={type:'p', text: line}; segs.push(cur); } else cur.text += ' ' + line;
+  }
+  while(segs.length && segs[segs.length-1].type==='br') segs.pop();
+  return segs;
 }
 
-/* ---------- Конфиг/состояние ---------- */
+/* ===== конфиг/состояние, отрисовка, логика набора ===== */
 function getCfg(){
   return {
-    fps: +$('fps').value||30,
+    prompt: $('prompt').value.trim() || 'Объясни простыми словами, как работает трансформер',
     cpsPrompt: +$('cpsPrompt').value||14,
+    think: +$('thinkSec').value||0,
+    answer: $('answer').value.trim() || '# Заголовок\nКороткий абзац.',
     cpsAnswer: +$('cpsAnswer').value||20,
-    thinkSec: +$('thinkSec').value||2,
-    pauseSentence: +$('pauseSentence').value||220,
-    pauseComma: +$('pauseComma').value||110,
-    soundOn: !!$('soundOn').checked,
-    font: 'System UI, -apple-system, Segoe UI, Roboto, Arial',
-    fs: 28,
-    youBg:'#16212e', youColor:'#cfe6ff',
-    aiBg:'#1b1f27', aiColor:'#e8edf2',
-    bg:'#0b0f13'
+    pauseS: +$('pauseSentence').value||220,
+    pauseC: +$('pauseComma').value||110,
+    fps: Math.min(60,Math.max(15, +$('fps').value||30)),
+    avaSize: Math.min(80, Math.max(28, +$('avaSize').value||42)),
+    uiFont, chatFont
   };
 }
 function buildState(cfg){
-  const prompt = $('prompt').value || '';
-  const blocks = mdToBlocks($('answer').value || '');
   return {
-    phase: 'prompt',
-    promptTxt: prompt,
-    blocks,
-    pIdx: 0, // символы промта
-    aLine: 0, aChar: 0, aPause: 0,
-    thinkLeft: Math.max(0, Math.round(cfg.thinkSec*1000)),
-    __ts: performance.now()
+    phase:'typePrompt',
+    pIdx:0, pIntervals:buildIntervals(cfg.prompt,cfg.cpsPrompt,cfg.pauseS,cfg.pauseC), pLeft:0,
+    segs: mdToSegments(cfg.answer), segI:0, segChar:0, segIntervals:[], segLeft:0, betweenPause:0,
+    thinkLeft: cfg.think*1000,
+    messages:[], // {who:'you'|'ai'|'think', segs?, typedLens?, text?}
+    scrollY:0, targetScroll:0, tAccum:0
   };
 }
 
-/* ---------- Типографика и звук ---------- */
-let tapCtx=null, tapBuf=null;
-async function ensureTap(){
-  if (tapCtx) return;
-  try{
-    const AC = window.AudioContext||window.webkitAudioContext;
-    tapCtx = new AC();
-    const sr=tapCtx.sampleRate, len=sr*0.03, buf=tapCtx.createBuffer(1,len,sr);
-    const data=buf.getChannelData(0);
-    for(let i=0;i<len;i++){ data[i]=Math.sin(2*Math.PI*300*i/sr)*Math.exp(-6*i/len); }
-    tapBuf=buf;
-  }catch(e){ tapCtx=null; tapBuf=null; }
+function drawToolbar(cfg){
+  ctx.fillStyle='#0f141b'; ctx.fillRect(0,0,W,TOP);
+  const x=18,y=16; ctx.fillStyle='#f15b5b'; ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#f6c451'; ctx.beginPath(); ctx.arc(x+16,y,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#5ac16e'; ctx.beginPath(); ctx.arc(x+32,y,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#9fb1c3'; ctx.font=`13px ${uiFont}`; ctx.fillText('Chat • Demo', 70, 14);
 }
-function playTap(){
-  if(!tapCtx||!tapBuf) return;
-  const src=tapCtx.createBufferSource();
-  src.buffer=tapBuf; src.connect(tapCtx.destination); src.start(0);
+function drawInputLine(cfg, typed){
+  ctx.fillStyle='#0f141b'; ctx.fillRect(0,H-BOT,W,BOT);
+  const x=14,y=H-BOT+10,w=W-28,h=44;
+  ctx.fillStyle='#0b0f13'; roundRect(ctx,x,y,w,h,10); ctx.fill();
+  ctx.strokeStyle='#1e2a36'; ctx.lineWidth=1; roundRect(ctx,x,y,w,h,10); ctx.stroke();
+  ctx.save(); ctx.beginPath(); roundRect(ctx,x,y,w,h,10); ctx.clip();
+  ctx.fillStyle='#cfe3f7'; ctx.font=`17px ${uiFont}`; ctx.textBaseline='middle';
+  ctx.fillText(typed, x+12, y+h/2);
+  const caretH=20, cx=x+12+ctx.measureText(typed).width+4, cy=y+h/2 - caretH/2;
+  const blink=(Math.floor(Date.now()/500)%2)===0; if(blink) ctx.fillRect(cx,cy,2,caretH);
+  ctx.restore();
+}
+function drawAvatar(img, x, y, size, label, color){ const r=size/2; ctx.save(); ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.clip();
+  if(img) ctx.drawImage(img, x-r, y-r, size, size);
+  else { ctx.fillStyle=color; ctx.fillRect(x-r,y-r,size,size);
+         ctx.fillStyle='#e5eef8'; ctx.font=`700 ${Math.round(size*0.45)}px ${uiFont}`; ctx.textBaseline='middle';
+         const w=ctx.measureText(label).width; ctx.fillText(label, x-w/2, y); }
+  ctx.restore();
+}
+function drawBubbleUser(cfg, text, y){
+  const pad=12,r=14,maxW=700,s=cfg.avaSize,space=10;
+  const avaX=W-22 - s/2, avaY=y+s/2+6;
+  ctx.font=`17px ${cfg.chatFont}`; ctx.textBaseline='top';
+  const lines=measureWrap(text,`17px ${cfg.chatFont}`,maxW-2*pad);
+  const h=lines.length*Math.round(17*1.55)+2*pad;
+  const w=maxW, x=W-22 - s - space - w;
+  roundRect(ctx,x,y,w,h,r); ctx.fillStyle='#14324b'; ctx.fill();
+  ctx.fillStyle='#e5eef8'; let ty=y+pad; for(const ln of lines){ ctx.fillText(ln,x+pad,ty); ty+=Math.round(17*1.55); }
+  drawAvatar(imgYou, avaX, avaY, s, 'Y', '#334155');
+  return Math.max(h,s)+6;
+}
+function drawBubbleAI(cfg, segs, typedLens, y){
+  const pad=12,r=14,maxW=900,s=cfg.avaSize,space=10,x=22 + s + space;
+  // measure
+  let h=pad, items=[];
+  for(let i=0;i<segs.length;i++){
+    const sgm=segs[i]; const len=typedLens[i]??(sgm.text?sgm.text.length:0); const txt=(sgm.text||'').slice(0,len);
+    if(sgm.type==='br'){ h+=6; items.push({type:'br'}); continue; }
+    if(sgm.type==='h1'){ const size=22, f=`800 ${size}px ${cfg.chatFont}`; const lines=measureWrap(txt,f,maxW-2*pad); items.push({type:'h1',lines,size,font:f}); h+=lines.length*Math.round(size*1.3)+8; continue; }
+    if(sgm.type==='h2'){ const size=18, f=`700 ${size}px ${cfg.chatFont}`; const lines=measureWrap(txt,f,maxW-2*pad); items.push({type:'h2',lines,size,font:f}); h+=lines.length*Math.round(size*1.4)+8; continue; }
+    if(sgm.type==='li'){ const size=17, f=`${size}px ${cfg.chatFont}`; const lines=measureWrap(txt,f,maxW-2*pad-18); items.push({type:'li',lines,size,font:f}); h+=lines.length*Math.round(size*1.55); continue; }
+    if(sgm.type==='ol'){ const size=17, f=`${size}px ${cfg.chatFont}`; const lines=measureWrap(txt,f,maxW-2*pad-28); items.push({type:'ol',idx:sgm.idx,lines,size,font:f}); h+=lines.length*Math.round(size*1.55); continue; }
+    const size=17, f=`${size}px ${cfg.chatFont}`; const lines=measureWrap(txt,f,maxW-2*pad); items.push({type:'p',lines,size,font:f}); h+=lines.length*Math.round(size*1.55)+8;
+  }
+  h+=pad;
+  // bubble
+  roundRect(ctx,x,y,maxW,h,r); ctx.fillStyle='#1a222c'; ctx.fill();
+  // text
+  let ty=y+pad;
+  for(const it of items){
+    if(it.type==='br'){ ty+=6; continue; }
+    ctx.font=it.font; ctx.fillStyle=(it.type==='h2')?'#c6d3df':'#e5eef8';
+    // • bullet-list: маркер только у первой строки, переносы — с отступом
+if(it.type==='li'){
+  const bullet = '• ';
+  const m = ctx.measureText(bullet).width;
+  for(let i=0;i<it.lines.length;i++){
+    const ln = it.lines[i];
+    if(i===0) ctx.fillText(bullet, x+pad, ty);
+    ctx.fillText(ln, x+pad+m, ty);
+    ty += Math.round(it.size*1.55);
+  }
+  continue;
 }
 
-/* ---------- Рендер кадра ---------- */
-function renderFrame(cfg, st){
-  ctx.fillStyle=cfg.bg; ctx.fillRect(0,0,W,H);
-
-  // PROMPT bubble (слева)
-  const leftX=80, rightX=240, bubbleW= W- leftX - 80;
-  const pText = st.promptTxt.slice(0, st.pIdx);
-  const pLines = pText? [{type:'p',render:pText}] : [];
-  let pBoxH=0;
-  if (pLines.length){
-    // измерим высоту
-    let tmp=0; ctx.font=fontFor('p', cfg);
-    for(const ln of pLines){ const chunks=wrap(ln.render, ctx, bubbleW-32); tmp += lineHeightFor('p', cfg)*chunks.length; }
-    pBoxH = tmp + 32;
-    bubble(ctx, leftX, 80, bubbleW, pLines, {bg:cfg.youBg,color:cfg.youColor,fs:cfg.fs,font:cfg.font,boxH:pBoxH});
+// 1. ordered-list: номер только у первой строки, переносы — с отступом
+if(it.type==='ol'){
+  const label = (it.idx||1)+'. ';
+  const m = ctx.measureText(label).width;
+  for(let i=0;i<it.lines.length;i++){
+    const ln = it.lines[i];
+    if(i===0) ctx.fillText(label, x+pad, ty);
+    ctx.fillText(ln, x+pad+m, ty);
+    ty += Math.round(it.size*1.55);
   }
-
-  // ANSWER bubble (справа)
-  // Собираем отображаемые строки до текущего индекса
-  let shown=[];
-  for(let i=0;i<st.aLine;i++){ const b=st.blocks[i]; shown.push({...b, render:b.type==='ol'? (b.idx+'. '+b.text) : (b.type==='ul'? ('• '+b.text): b.text)}); }
-  if (st.aLine < st.blocks.length){
-    const cur = st.blocks[st.aLine];
-    const prefix = (cur.type==='ol')? (cur.idx+'. ') : (cur.type==='ul'? '• ' : '');
-    const curTxt = prefix + (cur.text||'');
-    shown.push({...cur, render: curTxt.slice(0, st.aChar)});
-  }
-
-  // измерим высоту ответа
-  let aH=0;
-  for(const ln of shown){
-    const lh=lineHeightFor(ln.type,cfg);
-    ctx.font=fontFor(ln.type,cfg);
-    const chunks = wrap(ln.render, ctx, bubbleW-32);
-    aH += lh * (chunks.length||1);
-  }
-  if (shown.length) aH += 32;
-  const ay = pLines.length? (80 + pBoxH + 18) : 80;
-  if (shown.length){
-    bubble(ctx, rightX, ay, bubbleW, shown, {bg:cfg.aiBg,color:cfg.aiColor,fs:cfg.fs,font:cfg.font,boxH:aH});
-  }
+  continue;
 }
 
-/* ---------- Шаг симуляции ---------- */
-function step(cfg, st, dt){
-  const sent=/[.!?…]/, comma=/[,;:]/;
-
-  if (st.phase==='prompt'){
-    // печатаем промт
-    const iv = 1000/Math.max(1,cfg.cpsPrompt);
-    st.pIdx += Math.max(0, Math.floor(dt/iv));
-    if (st.pIdx >= st.promptTxt.length){
-      st.pIdx = st.promptTxt.length;
-      st.phase = 'think';
-    } else {
-      if (cfg.soundOn) playTap();
+    for(const ln of it.lines){ ctx.fillText(ln, x+pad, ty); ty+= (it.type==='h1')?Math.round(it.size*1.3):Math.round(it.size*1.55); }
+    ty+=8;
+  }
+  // avatar
+  const avaX=22 + s/2, avaY=y+s/2+6; drawAvatar(imgAI, avaX, avaY, s, 'AI', '#111827');
+  return Math.max(h,s)+6;
+}
+function drawThinking(cfg,y,t){
+  const s=cfg.avaSize, space=10, x=22 + s + space, h=40, w=220, r=14;
+  roundRect(ctx,x,y,w,h,r); ctx.fillStyle='#1a222c'; ctx.fill();
+  ctx.fillStyle='#9aa7b4'; ctx.font=`16px ${cfg.chatFont}`; ctx.textBaseline='middle'; ctx.fillText('Generating', x+12, y+h/2);
+  const bx=x+12+ctx.measureText('Generating ').width;
+  for(let i=0;i<3;i++){ const a=0.3+0.7*Math.abs(Math.sin((t/300)+(i*0.6))); ctx.fillStyle=`rgba(155,170,180,${a.toFixed(3)})`; ctx.beginPath(); ctx.arc(bx+10*i, y+h/2, 3, 0, Math.PI*2); ctx.fill(); }
+  const avaX=22 + s/2, avaY=y+s/2+6; drawAvatar(imgAI, avaX, avaY, s, 'AI', '#111827');
+  return Math.max(h,s)+6;
+}
+function measureContentHeight(cfg,st){
+  let y=0;
+  for(const m of st.messages){
+    if(m.who==='you') y+= drawBubbleUser(cfg, m.text, 10000);
+    else if(m.who==='think') y+= drawThinking(cfg, 10000, st.tAccum);
+    else y+= drawBubbleAI(cfg, m.segs, m.typedLens, 10000);
+  }
+  return y;
+}
+function render(st,cfg){
+  ctx.fillStyle='#0b0f13'; ctx.fillRect(0,0,W,H);
+  drawToolbar(cfg);
+  // chat area
+  ctx.save(); ctx.beginPath(); ctx.rect(0,TOP,W,H-TOP-BOT); ctx.clip();
+  const contentH = measureContentHeight(cfg, st);
+  st.targetScroll = Math.max(0, contentH - (H-TOP-BOT));
+  st.scrollY = lerp(st.scrollY, st.targetScroll, 0.25);
+  let y = TOP + 6 - st.scrollY;
+  for(const m of st.messages){
+    if(m.who==='you') y += drawBubbleUser(cfg, m.text, y);
+    else if(m.who==='think') y += drawThinking(cfg, y, st.tAccum);
+    else y += drawBubbleAI(cfg, m.segs, m.typedLens, y);
+  }
+  ctx.restore();
+  if(st.phase==='typePrompt') drawInputLine(cfg, cfg.prompt.slice(0, st.pIdx));
+  else { ctx.fillStyle='#0f141b'; ctx.fillRect(0,H-BOT,W,BOT); }
+}
+function step(st,cfg,dt){
+  st.tAccum += dt;
+  if(st.phase==='typePrompt'){
+    while(dt>0 && st.pIdx < cfg.prompt.length){
+      if(st.pLeft>dt){ st.pLeft-=dt; dt=0; break; }
+      dt-=st.pLeft; st.pIdx++; st.pLeft = st.pIntervals[st.pIdx]||0; playClick();
     }
-    return;
-  }
-
-  if (st.phase==='think'){
+    if(st.pIdx>=cfg.prompt.length){
+      st.messages.push({who:'you', text: cfg.prompt});
+      st.phase = (cfg.think>0) ? 'thinking' : 'typeAnswer';
+    }
+  } else if(st.phase==='thinking'){
+    if(!st.messages.find(m=>m.who==='think')) st.messages.push({who:'think'});
     st.thinkLeft -= dt;
-    if (st.thinkLeft <= 0){
-      st.phase = 'answer';
+    if(st.thinkLeft<=0){
+      st.messages = st.messages.filter(m=>m.who!=='think');
+      st.messages.push({who:'ai', segs: st.segs, typedLens: st.segs.map(()=>0)});
+      st.phase='typeAnswer';
+      const s=st.segs[0]; st.segIntervals = buildIntervals(s.text||'', cfg.cpsAnswer, cfg.pauseS, cfg.pauseC);
+      st.segLeft = st.segIntervals[0]||0; st.betweenPause=0; st.segChar=0; st.segI=0;
     }
-    return;
-  }
-
-  if (st.phase==='answer'){
-    const cur = st.blocks[st.aLine];
-    if (!cur){ st.phase='done'; return; }
-    const baseIv = 1000/Math.max(1,cfg.cpsAnswer);
-
-    if (st.aPause > 0){
-      st.aPause -= dt;
-      return;
-    }
-
-    st.aChar += Math.max(0, Math.floor(dt/baseIv));
-    const prefix = (cur.type==='ol')? (cur.idx+'. ') : (cur.type==='ul'? '• ' : '');
-    const curTxt = prefix + (cur.text||'');
-
-    // доп. паузы
-    const ch = curTxt[st.aChar-1] || '';
-    if (sent.test(ch)) st.aPause += cfg.pauseSentence;
-    else if (comma.test(ch)) st.aPause += cfg.pauseComma;
-
-    if (st.aChar >= curTxt.length){
-      st.aLine += 1;
-      st.aChar = 0;
-      st.aPause = 0;
-      if (st.aLine >= st.blocks.length){
-        st.phase='done';
+  } else if(st.phase==='typeAnswer'){
+    if(st.segI >= st.segs.length){ st.phase='done'; return; }
+    if(st.betweenPause>0){ st.betweenPause -= dt; return; }
+    const s=st.segs[st.segI];
+    if(s.type==='br'){ st.messages[st.messages.length-1].typedLens[st.segI]=0; st.segI++; st.betweenPause=80; return; }
+    while(dt>0){
+      const intervals=st.segIntervals;
+      if(st.segChar < intervals.length){
+        if(st.segLeft>dt){ st.segLeft-=dt; dt=0; break; }
+        dt-=st.segLeft; st.segChar++; st.segLeft = intervals[st.segChar]||0;
+        st.messages[st.messages.length-1].typedLens[st.segI]=st.segChar; playClick();
+      } else {
+        st.segI++; st.segChar=0; st.betweenPause=120;
+        if(st.segI>=st.segs.length) break;
+        const ns=st.segs[st.segI];
+        st.segIntervals = buildIntervals(ns.text||'', cfg.cpsAnswer, cfg.pauseS, cfg.pauseC);
+        st.segLeft = st.segIntervals[0]||0;
+        break;
       }
-    } else {
-      if (cfg.soundOn) playTap();
     }
-    return;
+    if(st.segI>=st.segs.length) st.phase='done';
   }
 }
 
-/* ---------- Предпросмотр ---------- */
-let running=false, afId=0;
-function runPreview(){
-  if (running) return;
-  running=true; window.__CLIP_DONE__=false; setStatus('Предпросмотр…');
-
-  const cfg=getCfg(); const st=buildState(cfg);
+/* ===== предпросмотр и экспорт ===== */
+let running=false;
+async function runPreview(){
+  if(running) return; running=true; setStatus('Предпросмотр…');
+  const cfg=getCfg(); let st=buildState(cfg); if($('soundOn').checked) initAudio();
   let last=performance.now();
-  function loop(ts){
-    if (!running) return;
-    const dt = ts - last; last = ts;
-    step(cfg, st, dt);
-    renderFrame(cfg, st);
-    if (st.phase==='done'){
-      running=false; window.__CLIP_DONE__=true;
-      setStatus('Готово');
-      return;
-    }
-    afId = requestAnimationFrame(loop);
+  function frame(now){
+    if(!running) return;
+    const dt=now-last; last=now;
+    step(st,cfg,dt); render(st,cfg);
+    if(st.phase!=='done') requestAnimationFrame(frame);
+    else { running=false; setStatus('Готово'); }
   }
-  afId = requestAnimationFrame(t=>{ last=t; loop(t); });
+  requestAnimationFrame(ts=>{ last=ts; frame(ts); });
 }
-
-/* ---------- Экспорт ---------- */
 async function runExport(){
-  if (running) return;
-  running=true; window.__CLIP_DONE__=false; setStatus('Экспорт…');
-  const cfg=getCfg(); const st=buildState(cfg);
-
-  const stream=cv.captureStream(cfg.fps||30);
-  const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
-             : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm');
-  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
-  const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-  const done=new Promise(res=>rec.onstop=res);
-
-  rec.start();
-  const iv = 1000/(cfg.fps||30);
-  let stop=false;
-  (async ()=>{
-    while(!stop){
-      step(cfg, st, iv);
-      renderFrame(cfg, st);
-      if (st.phase==='done') break;
-      await sleep(iv);
+  if(running) return; running=true; $('exportBtn').disabled=true; setStatus('Экспорт WebM…');
+  try{
+    const cfg=getCfg(); let st=buildState(cfg);
+    const canvasStream = document.getElementById('cv').captureStream(cfg.fps);
+    let stream = canvasStream;
+    if($('soundOn').checked){
+      initAudio(); recDest = audioCtx.createMediaStreamDestination(); masterGain.connect(recDest);
+      stream = new MediaStream([...canvasStream.getTracks(), ...recDest.stream.getTracks()]);
     }
-    // пару кадров «задержки»
-    for(let i=0;i<Math.round((cfg.fps||30)*0.5);i++){ renderFrame(cfg, st); await sleep(iv); }
-    rec.stop();
-  })();
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':
+                 (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')?'video/webm;codecs=vp8':'video/webm');
+    const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
+    const chunks=[]; rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+    const done=new Promise(res=>rec.onstop=res); rec.start();
 
-  await done; stop=true;
-  const blob=new Blob(chunks,{type:mime});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='chat_typing.webm';
-  document.body.appendChild(a); a.click(); a.remove();
-  setStatus('Скачан chat_typing.webm');
-  running=false; window.__CLIP_DONE__=true;
+    const dt=1000/cfg.fps;
+    while(st.phase!=='done'){ step(st,cfg,dt); render(st,cfg); await sleep(dt); }
+    for(let i=0;i<Math.round(0.3*cfg.fps);i++){ render(st,cfg); await sleep(dt); }
+
+    rec.stop(); await done;
+    const blob=new Blob(chunks,{type:mime}); const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='chat_typing.webm'; document.body.appendChild(a); a.click(); a.remove();
+    setStatus('Готово: скачан chat_typing.webm');
+  }catch(e){ console.error(e); setStatus('Экспорт не удался: '+e.message); }
+  finally{ running=false; $('exportBtn').disabled=false; }
 }
 
-/* ---------- Привязка UI ---------- */
+/* ===== биндинги и стартовый кадр ===== */
 $('previewBtn').addEventListener('click', runPreview);
 $('exportBtn').addEventListener('click', runExport);
-
-/* ---------- STATE из ?data= и авто-заполнение ---------- */
-(async () => {
-  const qs = new URLSearchParams(location.search);
-  const b64 = qs.get('data') || '';
-  let STATE = {};
-  if (b64) { try { STATE = JSON.parse(atob(b64)); } catch(e){} }
-  window.STATE = STATE;
-
-  // автозаполнение
-  const set = (sel,val) => { const el=document.querySelector(sel); if(!el||val==null) return;
-                             el.value = Array.isArray(val) ? val.join('\n\n') : String(val);
-                             el.dispatchEvent(new Event('input',{bubbles:true}));
-                             el.dispatchEvent(new Event('change',{bubbles:true})); };
-  if(STATE.prompt) set('#prompt', STATE.prompt);
-  if(STATE.lines)  set('#answer', Array.isArray(STATE.lines)? STATE.lines.join('\n\n') : STATE.lines);
-  if(STATE.cpsPrompt) set('#cpsPrompt', STATE.cpsPrompt);
-  if(STATE.cpsAnswer) set('#cpsAnswer', STATE.cpsAnswer);
-  if(STATE.pauseSentence) set('#pauseSentence', STATE.pauseSentence);
-  if(STATE.pauseComma) set('#pauseComma', STATE.pauseComma);
-  if(STATE.fps) set('#fps', STATE.fps);
-  if(STATE.soundOn===true) $('soundOn').checked = true;
-
-  // первый кадр
-  renderFrame(getCfg(), buildState(getCfg()));
-
-  // автозапуск только если не запрещён
-  const autostart = (qs.get('autostart') !== '0') && (STATE.autostart !== false);
-  if (autostart) runPreview();
-})();
+setStatus('Готово');
+render(buildState(getCfg()), getCfg());
 </script>
 </body>
 </html>
+
 
 
 

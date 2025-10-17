@@ -29,7 +29,6 @@
 <script type="module" src="./js/recorder.js"></script>
 <!-- опциональный фиксер длительности (даже заглушка не повредит) -->
 <script src="./vendor/webm-duration-fix.min.js"></script>
-
 </head>
 <body>
 <div class="wrap">
@@ -127,6 +126,8 @@
 <script>
 const W=1280,H=720, ctx=document.getElementById('cv').getContext('2d',{alpha:false});
 const $=id=>document.getElementById(id); const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* — Утилиты — */
 function fontCSS({b,i,fs,font}){ let f=''; if(i) f+='italic '; if(b) f+='800 '; f+=fs+'px '+font; return f; }
 function drawUnderline(x,y,w,col,th=2){ ctx.save(); ctx.fillStyle=col; ctx.fillRect(x, y+4, w, th); ctx.restore(); }
 function measure(text,font){ ctx.save(); ctx.font=font; const w=ctx.measureText(text).width; ctx.restore(); return w; }
@@ -135,6 +136,7 @@ function wrap(text,font,maxW){ ctx.save(); ctx.font=font; const words=(text||'')
   if(cur) lines.push(cur); ctx.restore(); return lines; }
 function cpsIv(text,cps){ const base=1000/Math.max(1,cps); return Array.from(text||'', _=>base); }
 
+/* — Конфиг/состояние — */
 function cfg(){
   return {
     sceneBg: $('sceneBg').value,
@@ -142,7 +144,7 @@ function cfg(){
     fps: +$('fps').value||30,
     pauseS: +$('pauseSentence').value, pauseC:+$('pauseComma').value,
     holdSec:+$('holdSec').value,
-    scale: Math.max(.5, Math.min(1.2, +$('scalePct').value/100)),
+    scale: Math.max(.5, Math.min(1.2, +$('scalePct').value/100)), // масштаб ТОЛЬКО текста
     panelCol: $('panelColor').value, panelA:+$('panelAlpha').value,
     textPad: +$('textPad').value, maxWCoef:+$('maxW').value/100,
     H1:{text:$('title').value,  font:$('fontH1').value,fs:+$('fsH1').value,col:$('colH1').value,b:$('bH1').checked,i:$('iH1').checked,u:$('uH1').checked,cps:+$('cpsH1').value},
@@ -159,14 +161,19 @@ function buildState(c){
   };
 }
 
+/* — Лейаут с вертикальным центрированием текста. Плашка — fullscreen — */
 function layout(c,st){
+  // уже напечатанные фрагменты
   const t1=c.H1.text.slice(0,st.H1.idx), t2=c.H2.text.slice(0,st.H2.idx), t3=c.P.text.slice(0,st.P.idx);
+
+  // МАСШТАБ: текст рисуем в системе координат до скейла; чтобы
+  // max ширина после скейла осталась равной % от кадра, делим на scale.
   const maxWpre = (W*c.maxWCoef)/c.scale;
   const pad = c.textPad / c.scale;
 
-  const font1=(c.H1.i?'italic ':'')+(c.H1.b?'800 ':'')+c.H1.fs+'px '+c.H1.font;
-  const font2=(c.H2.i?'italic ':'')+(c.H2.b?'700 ':'')+c.H2.fs+'px '+c.H2.font;
-  const font3=(c.P.i?'italic ':'') +(c.P.b?'700 ':'') +c.P.fs +'px '+c.P.font;
+  const font1=fontCSS({b:c.H1.b,i:c.H1.i,fs:c.H1.fs,font:c.H1.font});
+  const font2=fontCSS({b:c.H2.b,i:c.H2.i,fs:c.H2.fs,font:c.H2.font});
+  const font3=fontCSS({b:c.P.b ,i:c.P.i ,fs:c.P.fs ,font:c.P.font });
 
   const lh1=Math.round(c.H1.fs*1.15), lh2=Math.round(c.H2.fs*1.2), lh3=Math.round(c.P.fs*1.35);
   const gap12=10, gap23=8;
@@ -179,16 +186,23 @@ function layout(c,st){
                 + (L2.length?L2.length*lh2:0) + ((L1.length||L2.length)&&L3.length?gap23:0)
                 + (L3.length?L3.length*lh3:0) + pad;
 
+  // вертикальный центр текста (в до-скейловых координатах!)
   const startY = (H/c.scale - contentH)/2;
+
+  // горизонталь
   const centerX = W/(2*c.scale);
+  let xLeft = centerX - (maxWpre/2);
+  let xRight= centerX + (maxWpre/2);
   let xText;
   if(c.align==='center') xText=centerX;
-  else if(c.align==='left') xText= centerX - (maxWpre/2) + pad;
-  else xText= centerX + (maxWpre/2) - pad;
+  else if(c.align==='left') xText=xLeft+pad;
+  else xText=xRight-pad;
 
-  return {L1,L2,L3,font1,font2,font3,lh1,lh2,lh3, startY, xText, centerX, pad, align:c.align};
+  return {L1,L2,L3,font1,font2,font3,lh1,lh2,lh3,
+          startY, xText, centerX, maxWpre, pad};
 }
 
+/* — Отрисовка — */
 function drawLines(lines, x, yStart, lh, font, col, align, underline=false){
   ctx.font=font; ctx.fillStyle=col; ctx.textBaseline='alphabetic'; ctx.textAlign=align;
   let y=yStart;
@@ -198,24 +212,40 @@ function drawLines(lines, x, yStart, lh, font, col, align, underline=false){
     if(underline){
       const w=measure(line,font);
       const ux = (align==='center')? x - w/2 : (align==='right'? x - w : x);
-      ctx.fillStyle=col; ctx.fillRect(ux, by+4, w, Math.max(2, Math.round(parseInt(font)*0.06)));
+      drawUnderline(ux, by, w, col, Math.max(2, Math.round(parseInt(font)*0.06)));
     }
     y+=lh;
   }
 }
-
 function render(c,st){
-  ctx.fillStyle=$('sceneBg').value; ctx.fillRect(0,0,W,H);
-  ctx.save(); ctx.globalAlpha=+$('panelAlpha').value; ctx.fillStyle=$('panelColor').value; ctx.fillRect(0,0,W,H); ctx.restore();
-  ctx.save(); ctx.translate(W/2,H/2); ctx.scale(+$('scalePct').value/100, +$('scalePct').value/100); ctx.translate(-W/2,-H/2);
-  const L=layout(c,st); let y=L.startY + L.pad;
-  const ax = (L.align==='center'?L.centerX:L.xText);
-  if(L.L1.length){ drawLines(L.L1, ax, y, L.lh1, L.font1, $('colH1').value, L.align, $('uH1').checked); y+=L.lh1*L.L1.length + (L.L2.length?10:0); }
-  if(L.L2.length){ drawLines(L.L2, ax, y, L.lh2, L.font2, $('colH2').value, L.align, $('uH2').checked); y+=L.lh2*L.L2.length + (L.L3.length?8:0); }
-  if(L.L3.length){ drawLines(L.L3, ax, y, L.lh3, L.font3, $('colP').value , L.align, $('uP').checked ); }
+  // фон сцены
+  ctx.fillStyle=c.sceneBg; ctx.fillRect(0,0,W,H);
+  // плашка — ВСЕГДА на весь экран
+  ctx.save(); ctx.globalAlpha=c.panelA; ctx.fillStyle=c.panelCol; ctx.fillRect(0,0,W,H); ctx.restore();
+
+  // текст — масштаб и центрирование (масштаб только для текста)
+  ctx.save();
+  ctx.translate(W/2, H/2); ctx.scale(c.scale, c.scale); ctx.translate(-W/2, -H/2);
+
+  const L=layout(c,st);
+
+  let y=L.startY + L.pad;
+  if(L.L1.length){
+    drawLines(L.L1, (c.align==='center'?L.centerX:L.xText), y, L.lh1, L.font1, c.H1.col, c.align, c.H1.u);
+    y += L.lh1*L.L1.length + (L.L2.length?10:0);
+  }
+  if(L.L2.length){
+    drawLines(L.L2, (c.align==='center'?L.centerX:L.xText), y, L.lh2, L.font2, c.H2.col, c.align, c.H2.u);
+    y += L.lh2*L.L2.length + (L.L3.length?8:0);
+  }
+  if(L.L3.length){
+    drawLines(L.L3, (c.align==='center'?L.centerX:L.xText), y, L.lh3, L.font3, c.P.col, c.align, c.P.u);
+  }
+
   ctx.restore();
 }
 
+/* — Печать — */
 function step(st,c,dt){
   const SENT=/[.!?…]/, COMM=/[,;:]/;
   const advance=(key,text,iv)=>{
@@ -242,6 +272,7 @@ function step(st,c,dt){
   }
 }
 
+/* — Предпросмотр / Экспорт — */
 let running=false;
 async function preview(){
   if(running) return; running=true; $('status').textContent='Предпросмотр…';
@@ -249,11 +280,10 @@ async function preview(){
   function frame(now){
     if(!running) return; const dt=now-last; last=now; step(st,c,dt); render(c,st);
     if(st.phase!=='done') requestAnimationFrame(frame);
-    else { running=false; window.__CLIP_DONE__=true; $('status').textContent='Готово'; }
+    else { running=false; $('status').textContent='Готово'; }
   }
   requestAnimationFrame(ts=>{ last=ts; frame(ts); });
 }
-
 async function exportWebM(){
   if(running) return; running=true; $('exportBtn').disabled=true; $('status').textContent='Экспорт…';
   try{
@@ -275,54 +305,10 @@ async function exportWebM(){
   finally{ running=false; $('exportBtn').disabled=false; }
 }
 
+/* — Bindings — */
 $('previewBtn').addEventListener('click', preview);
 $('exportBtn').addEventListener('click', exportWebM);
 render(cfg(), buildState(cfg()));
-</script>
-<script>
-(async () => {
-  const qs = new URLSearchParams(location.search);
-  const b64 = qs.get('data') || '';
-  let STATE = {};
-  if (b64) { try { STATE = JSON.parse(atob(b64)); } catch(e){} }
-  window.STATE = STATE;
-  if (document.fonts?.ready) { try { await document.fonts.ready; } catch(_){} }
-})();
-</script>
-<script>
-/* Автозаполнение из STATE (если есть), БЕЗ автозапуска */
-(function startWithState(S){
-  S = S || (window.STATE || {});
-  const set = (sel, val) => {
-    const el = document.querySelector(sel);
-    if (!el || val == null) return;
-    el.value = Array.isArray(val) ? val.join('\n') : String(val);
-    el.dispatchEvent(new Event('input', {bubbles:true}));
-    el.dispatchEvent(new Event('change', {bubbles:true}));
-  };
-  set('#title',    S.title);
-  set('#subtitle', S.subtitle);
-  set('#body',     S.body);
-  if (S.bgColor)  document.body.style.background = S.bgColor;
-  if (S.textColor)document.body.style.color      = S.textColor;
-})(window.STATE);
-</script>
-<script>
-/* Автостарт — только если ?autostart!=0 и STATE.autostart!==false */
-(function autoStart() {
-  const qs = new URLSearchParams(location.search);
-  const allow = (qs.get('autostart') !== '0') && (window.STATE?.autostart !== false);
-  if (!allow) return;
-  const startFns = ['preview','runPreview','start','startPreview','play'];
-  for (const fn of startFns) {
-    if (typeof window[fn] === 'function') {
-      try { window[fn](window.STATE); return; } catch(e) {}
-    }
-  }
-  const selectors = ['#btnPreview', '#preview', '[data-action="preview"]', '.preview'];
-  for (const sel of selectors) { const el = document.querySelector(sel); if (el) { el.click(); return; } }
-  setTimeout(autoStart, 120);
-})();
 </script>
 </body>
 </html>

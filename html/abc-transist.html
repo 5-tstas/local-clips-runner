@@ -24,7 +24,6 @@
 <script type="module" src="./js/recorder.js"></script>
 <!-- опциональный фиксер длительности (даже заглушка не повредит) -->
 <script src="./vendor/webm-duration-fix.min.js"></script>
-
 </head>
 <body>
   <div class="panel">
@@ -242,7 +241,6 @@ async function preview(){
       await sleep(1000/opts.fps);
       if(!previewRunning) break;
     }
-    window.__CLIP_DONE__ = true;
     $('status').textContent='Готово';
   } catch(e){
     console.error(e);
@@ -294,41 +292,7 @@ async function exportWebM(){
 $('previewBtn').addEventListener('click', ()=>{ previewRunning=false; preview(); });
 $('exportBtn').addEventListener('click', exportWebM);
 </script>
-<script>
-(async () => {
-  const qs = new URLSearchParams(location.search);
-  const b64 = qs.get('data') || '';
-  let STATE = {};
-  if (b64) { try { STATE = JSON.parse(atob(b64)); } catch(e){} }
-  window.STATE = STATE;
-  if (document.fonts?.ready) { try { await document.fonts.ready; } catch(_){} }
-
-  // Если у вас есть свои init-функции — вызывайте их здесь:
-  if (window.initOverlay) window.initOverlay(STATE);
-  if (window.initChat) window.initChat(STATE);
-  if (window.initABC) window.initABC(STATE);
-})();
-</script>
-<script>
-/* Автостарт предпросмотра/анимации после загрузки страницы */
-(function autoStart() {
-  const startFns = ['preview','runPreview','start','startPreview','play'];
-  for (const fn of startFns) {
-    if (typeof window[fn] === 'function') {
-      try { window[fn](window.STATE); return; } catch(e) {}
-    }
-  }
-  // запасной вариант — клик по типовым кнопкам «Предпросмотр»
-  const selectors = ['#btnPreview', '#preview', '[data-action="preview"]', '.preview'];
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el) { el.click(); return; }
-  }
-  // если ничего не найдено, повторим попытку чуть позже (DOM может не успеть)
-  setTimeout(autoStart, 120);
-})();
-</script>
-
 </body>
 </html>
+
 
