@@ -67,3 +67,21 @@ export function downloadBlob(blob, filename) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+// Привязывает глобальный экспорт и кнопку (#exportBtn | #btnExport | #export)
+export function bindGlobalExport(recCtx, outName = 'export.webm', opts) {
+  const { finalDelayMs = 300 } = opts || {};
+  window.exportWebM = async () => {
+    return stopAndDownload(recCtx, outName, { finalDelayMs });
+  };
+
+  const btn = document.querySelector('#exportBtn, #btnExport, #export');
+  if (btn && !btn.dataset.webmClickBound) {
+    btn.dataset.webmClickBound = '1';
+    btn.addEventListener('click', () => {
+      window.exportWebM?.();
+    });
+  }
+
+  return window.exportWebM;
+}

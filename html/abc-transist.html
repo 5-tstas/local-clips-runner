@@ -83,7 +83,9 @@
     <canvas id="stage" width="1280" height="720"></canvas>
   </div>
 
-<script>
+<script type="module">
+import { startRecorder, bindGlobalExport } from './js/recorder.js';
+
 /* ===== Helpers ===== */
 const $ = id => document.getElementById(id);
 const canvas = $('stage'), ctx = canvas.getContext('2d', { alpha:false });
@@ -131,15 +133,12 @@ function transCross(fromImg, toImg, p, fit, zoomFrom=1, zoomTo=1){
 
 function transSlideLeft(fromImg, toImg, p, fit){
   const W=canvas.width, H=canvas.height;
-  // base
   drawImageFit(ctx, fromImg, fit, 1);
-  // slide to
   ctx.save();
-  const x = W * (1-p); //  from right -> left
+  const x = W * (1-p);
   ctx.translate(x, 0);
   drawImageFit(ctx, toImg, fit, 1);
   ctx.restore();
-  // slight shadow edge
   const g = ctx.createLinearGradient(x-16,0,x,0);
   g.addColorStop(0,'rgba(0,0,0,0.3)'); g.addColorStop(1,'rgba(0,0,0,0)');
   ctx.fillStyle = g; ctx.fillRect(x-16,0,16,H);
@@ -147,14 +146,11 @@ function transSlideLeft(fromImg, toImg, p, fit){
 
 function transNewsSwipe(fromImg, toImg, p, fit){
   const W=canvas.width, H=canvas.height;
-  // base
   drawImageFit(ctx, fromImg, fit, 1);
-  // reveal to with wipe
   ctx.save();
   ctx.beginPath(); ctx.rect(0,0,W*p,H); ctx.clip();
   drawImageFit(ctx, toImg, fit, 1);
   ctx.restore();
-  // cyan bar (accent edge)
   const x = W*p;
   const barW = 18;
   const g = ctx.createLinearGradient(x-2,0,x+barW,0);
@@ -162,7 +158,6 @@ function transNewsSwipe(fromImg, toImg, p, fit){
   g.addColorStop(0.2,'rgba(58,163,255,0.5)');
   g.addColorStop(1,'rgba(58,163,255,0.0)');
   ctx.fillStyle = g; ctx.fillRect(x-2,0,barW,H);
-  // grid + spark noise for tech feel
   drawGridOverlay(0.05 + 0.05*Math.sin(p*Math.PI));
   drawNoiseOverlay(0.03);
 }
@@ -171,12 +166,11 @@ function transNewsSwipe(fromImg, toImg, p, fit){
 function drawFrame(t, imgs, opts){
   const { A,B,C, transAB, transBC, fit } = opts;
   const W=canvas.width, H=canvas.height;
-  const tAB = 0.6, tBC = 0.6; // внутри блоков
+  const tAB = 0.6, tBC = 0.6;
 
   ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H);
 
   if (t < A){
-    // A segment with slight ken-burns
     const z = 1 + 0.02*(t/A);
     drawImageFit(ctx, imgs.a, fit, z);
     if (t > A - tAB){
@@ -199,7 +193,6 @@ function drawFrame(t, imgs, opts){
     }
     return;
   }
-  // C segment
   const tc = t - (A+B);
   const z = 1 + 0.008*(tc/C);
   drawImageFit(ctx, imgs.c, fit, z);
@@ -224,6 +217,21 @@ function getOpts(){
     transBC: $('tBC').value,
     fps: clamp(parseInt($('fps').value||'30',10), 15, 60),
     total: A+B+C
+  };
+}
+
+function withTotalCap(opts){
+  const maxTotal = 20;
+  if (opts.total <= maxTotal){
+    return opts;
+  }
+  const k = maxTotal / opts.total;
+  return {
+    ...opts,
+    A: opts.A * k,
+    B: opts.B * k,
+    C: opts.C * k,
+    total: maxTotal
   };
 }
 
@@ -252,48 +260,68 @@ async function preview(){
   }
 }
 
-async function exportWebM(){
+let exporting=false;
+async function exportABC(){
+  if(exporting) return;
+  exporting=true;
+  const btn=$('exportBtn');
+  if(btn) btn.disabled=true;
+  $('status').textContent='Экспорт WebM…';
   try{
-    $('exportBtn').disabled=true;
-    $('status').textContent='Экспорт WebM…';
     const imgs = await loadImages();
-    const opts = getOpts();
-    const stream = canvas.captureStream(opts.fps);
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
-                : MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8'
-                : 'video/webm';
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
-    const chunks = [];
-    rec.ondataavailable = e=>{ if(e.data && e.data.size) chunks.push(e.data); };
-    const done = new Promise(res=> rec.onstop = res);
-    rec.start();
-
-    const N = Math.round(opts.total * opts.fps);
-    for(let k=0;k<N;k++){
-      const t = k/opts.fps;
+    const opts = withTotalCap(getOpts());
+    const fps = 30;
+    const frameMs = 1000/fps;
+    const frames = Math.max(1, Math.round(opts.total * fps));
+    const recCtx = startRecorder(canvas, { fps, vbr: 5_000_000 });
+    bindGlobalExport(recCtx, 'abc_transition.webm', { finalDelayMs: 350 });
+    recCtx.rec.start();
+    for(let k=0;k<frames;k++){
+      const t = k / fps;
       drawFrame(t, imgs, opts);
-      await sleep(1000/opts.fps);
+      await sleep(frameMs);
     }
-    rec.stop();
-    await done;
-    const blob = new Blob(chunks, {type:mime});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'abc_transition.webm';
-    document.body.appendChild(a); a.click(); a.remove();
+    const finalT = (frames - 1) / fps;
+    const guardSec = Math.max(0, Math.min(0.6, 20 - opts.total));
+    const guardFrames = Math.round(guardSec * fps);
+    for(let i=0;i<guardFrames;i++){
+      drawFrame(finalT, imgs, opts);
+      await sleep(frameMs);
+    }
+    const blob = await window.exportWebM();
+    window.__CLIP_DONE__ = true;
     $('status').textContent = 'Готово: скачан WebM';
+    return blob;
   } catch(e){
     console.error(e);
-    $('status').textContent='Экспорт не удался: '+e.message;
+    $('status').textContent='Экспорт не удался: '+(e?.message||e);
   } finally{
-    $('exportBtn').disabled=false;
+    window.exportWebM = exportABC;
+    if(btn) btn.disabled=false;
+    exporting=false;
   }
 }
 
 /* Bindings */
-$('previewBtn').addEventListener('click', ()=>{ previewRunning=false; preview(); });
-$('exportBtn').addEventListener('click', exportWebM);
+const previewBtn=$('previewBtn');
+if(previewBtn){
+  previewBtn.addEventListener('click', ()=>{ previewRunning=false; preview(); });
+}
+
+const exportBtn=$('exportBtn');
+if(exportBtn && !exportBtn.dataset.webmClickBound){
+  exportBtn.dataset.webmClickBound='1';
+  exportBtn.addEventListener('click', ()=>{ window.exportWebM?.(); });
+}
+
+window.preview = preview;
+window.runPreview = preview;
+window.start = preview;
+window.startPreview = preview;
+window.play = preview;
+window.exportWebM = exportABC;
 </script>
+
 <script>
 (async () => {
   const qs = new URLSearchParams(location.search);

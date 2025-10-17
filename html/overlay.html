@@ -124,10 +124,15 @@
   <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
 </div>
 
-<script>
-const W=1280,H=720, ctx=document.getElementById('cv').getContext('2d',{alpha:false});
-const $=id=>document.getElementById(id); const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-function fontCSS({b,i,fs,font}){ let f=''; if(i) f+='italic '; if(b) f+='800 '; f+=fs+'px '+font; return f; }
+<script type="module">
+import { startRecorder, bindGlobalExport } from './js/recorder.js';
+
+const W=1280, H=720;
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d',{alpha:false});
+const $ = id => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 function drawUnderline(x,y,w,col,th=2){ ctx.save(); ctx.fillStyle=col; ctx.fillRect(x, y+4, w, th); ctx.restore(); }
 function measure(text,font){ ctx.save(); ctx.font=font; const w=ctx.measureText(text).width; ctx.restore(); return w; }
 function wrap(text,font,maxW){ ctx.save(); ctx.font=font; const words=(text||'').split(/\s+/); const lines=[]; let cur='';
@@ -150,6 +155,7 @@ function cfg(){
     P :{text:$('body').value,    font:$('fontP').value ,fs:+$('fsP').value ,col:$('colP').value ,b:$('bP').checked ,i:$('iP').checked ,u:$('uP').checked ,cps:+$('cpsP').value}
   };
 }
+
 function buildState(c){
   return {
     phase:'typing', holdLeft:c.holdSec*1000,
@@ -205,14 +211,14 @@ function drawLines(lines, x, yStart, lh, font, col, align, underline=false){
 }
 
 function render(c,st){
-  ctx.fillStyle=$('sceneBg').value; ctx.fillRect(0,0,W,H);
-  ctx.save(); ctx.globalAlpha=+$('panelAlpha').value; ctx.fillStyle=$('panelColor').value; ctx.fillRect(0,0,W,H); ctx.restore();
-  ctx.save(); ctx.translate(W/2,H/2); ctx.scale(+$('scalePct').value/100, +$('scalePct').value/100); ctx.translate(-W/2,-H/2);
+  ctx.fillStyle=c.sceneBg; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.globalAlpha=c.panelA; ctx.fillStyle=c.panelCol; ctx.fillRect(0,0,W,H); ctx.restore();
+  ctx.save(); ctx.translate(W/2,H/2); ctx.scale(c.scale, c.scale); ctx.translate(-W/2,-H/2);
   const L=layout(c,st); let y=L.startY + L.pad;
   const ax = (L.align==='center'?L.centerX:L.xText);
-  if(L.L1.length){ drawLines(L.L1, ax, y, L.lh1, L.font1, $('colH1').value, L.align, $('uH1').checked); y+=L.lh1*L.L1.length + (L.L2.length?10:0); }
-  if(L.L2.length){ drawLines(L.L2, ax, y, L.lh2, L.font2, $('colH2').value, L.align, $('uH2').checked); y+=L.lh2*L.L2.length + (L.L3.length?8:0); }
-  if(L.L3.length){ drawLines(L.L3, ax, y, L.lh3, L.font3, $('colP').value , L.align, $('uP').checked ); }
+  if(L.L1.length){ drawLines(L.L1, ax, y, L.lh1, L.font1, c.H1.col, L.align, c.H1.u); y+=L.lh1*L.L1.length + (L.L2.length?10:0); }
+  if(L.L2.length){ drawLines(L.L2, ax, y, L.lh2, L.font2, c.H2.col, L.align, c.H2.u); y+=L.lh2*L.L2.length + (L.L3.length?8:0); }
+  if(L.L3.length){ drawLines(L.L3, ax, y, L.lh3, L.font3, c.P.col , L.align, c.P.u ); }
   ctx.restore();
 }
 
@@ -242,43 +248,95 @@ function step(st,c,dt){
   }
 }
 
-let running=false;
+let previewRunning=false;
 async function preview(){
-  if(running) return; running=true; $('status').textContent='Предпросмотр…';
-  const c=cfg(); const st=buildState(c); let last=performance.now();
+  if(previewRunning) return;
+  previewRunning=true;
+  $('status').textContent='Предпросмотр…';
+  const c=cfg(); const st=buildState(c);
+  render(c,st);
+  let last=performance.now();
   function frame(now){
-    if(!running) return; const dt=now-last; last=now; step(st,c,dt); render(c,st);
+    if(!previewRunning) return;
+    const dt=Math.max(0, now-last); last=now;
+    step(st,c,dt); render(c,st);
     if(st.phase!=='done') requestAnimationFrame(frame);
-    else { running=false; window.__CLIP_DONE__=true; $('status').textContent='Готово'; }
+    else {
+      previewRunning=false;
+      window.__CLIP_DONE__=true;
+      $('status').textContent='Готово';
+    }
   }
   requestAnimationFrame(ts=>{ last=ts; frame(ts); });
 }
 
-async function exportWebM(){
-  if(running) return; running=true; $('exportBtn').disabled=true; $('status').textContent='Экспорт…';
+let exporting=false;
+async function exportOverlay(){
+  if(exporting) return;
+  exporting=true;
+  const btn=$('exportBtn');
+  if(btn) btn.disabled=true;
+  $('status').textContent='Экспорт WebM…';
   try{
-    const c=cfg(); const st=buildState(c);
-    const stream=document.getElementById('cv').captureStream(c.fps);
-    const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':
-               (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')?'video/webm;codecs=vp8':'video/webm');
-    const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
-    const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-    const done=new Promise(res=>rec.onstop=res); rec.start();
-    const dt=1000/(c.fps||30);
-    while(st.phase!=='done'){ step(st,c,dt); render(c,st); await sleep(dt); }
-    for(let i=0;i<Math.round(0.5*(c.fps||30));i++){ render(c,st); await sleep(dt); }
-    rec.stop(); await done;
-    const blob=new Blob(chunks,{type:mime}); const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download='overlay_fullpanel_center.webm'; document.body.appendChild(a); a.click(); a.remove();
+    const c=cfg();
+    const st=buildState(c);
+    const fps=30;
+    const frameMs=1000/fps;
+    render(c,st);
+    const recCtx=startRecorder(canvas,{fps, vbr:5_000_000});
+    bindGlobalExport(recCtx,'overlay_fullpanel_center.webm',{finalDelayMs:350});
+    recCtx.rec.start();
+    while(st.phase!=='done'){
+      step(st,c,frameMs);
+      render(c,st);
+      await sleep(frameMs);
+    }
+    const guardFrames=Math.max(1, Math.round(fps*0.5));
+    for(let i=0;i<guardFrames;i++){
+      render(c,st);
+      await sleep(frameMs);
+    }
+    const blob=await window.exportWebM();
+    window.__CLIP_DONE__=true;
     $('status').textContent='Скачан overlay_fullpanel_center.webm';
-  }catch(e){ console.error(e); $('status').textContent='Ошибка экспорта: '+e.message; }
-  finally{ running=false; $('exportBtn').disabled=false; }
+    return blob;
+  }catch(e){
+    console.error(e);
+    $('status').textContent='Ошибка экспорта: '+(e?.message||e);
+  }finally{
+    window.exportWebM = exportOverlay;
+    if($('exportBtn')) $('exportBtn').disabled=false;
+    exporting=false;
+  }
 }
 
-$('previewBtn').addEventListener('click', preview);
-$('exportBtn').addEventListener('click', exportWebM);
-render(cfg(), buildState(cfg()));
+const previewBtn=$('previewBtn');
+if(previewBtn){
+  previewBtn.addEventListener('click', ()=>{
+    previewRunning=false;
+    preview();
+  });
+}
+
+const exportBtn=$('exportBtn');
+if(exportBtn && !exportBtn.dataset.webmClickBound){
+  exportBtn.dataset.webmClickBound='1';
+  exportBtn.addEventListener('click', ()=>{
+    window.exportWebM?.();
+  });
+}
+
+window.preview = preview;
+window.runPreview = preview;
+window.start = preview;
+window.startPreview = preview;
+window.play = preview;
+window.exportWebM = exportOverlay;
+
+const initialCfg=cfg();
+render(initialCfg, buildState(initialCfg));
 </script>
+
 <script>
 (async () => {
   const qs = new URLSearchParams(location.search);
