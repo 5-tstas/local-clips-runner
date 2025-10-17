@@ -123,8 +123,10 @@
   <div class="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
 </div>
 
-<script>
+<script type="module">
+import { startRecorder, stopAndDownload } from './js/recorder.js';
 const W=1280,H=720, ctx=document.getElementById('cv').getContext('2d',{alpha:false});
+const canvas=document.getElementById('cv');
 const $=id=>document.getElementById(id); const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 /* — Утилиты — */
@@ -286,29 +288,29 @@ async function preview(){
 }
 async function exportWebM(){
   if(running) return; running=true; $('exportBtn').disabled=true; $('status').textContent='Экспорт…';
+  window.__CLIP_DONE__ = false;
   try{
     const c=cfg(); const st=buildState(c);
-    const stream=document.getElementById('cv').captureStream(c.fps);
-    const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':
-               (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')?'video/webm;codecs=vp8':'video/webm');
-    const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
-    const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-    const done=new Promise(res=>rec.onstop=res); rec.start();
+    render(c,st);
+    await new Promise(res=>requestAnimationFrame(()=>res()));
+    const recCtx = startRecorder(canvas,{fps:c.fps||30,vbr:5_000_000});
+    recCtx.rec.start();
     const dt=1000/(c.fps||30);
     while(st.phase!=='done'){ step(st,c,dt); render(c,st); await sleep(dt); }
     for(let i=0;i<Math.round(0.5*(c.fps||30));i++){ render(c,st); await sleep(dt); }
-    rec.stop(); await done;
-    const blob=new Blob(chunks,{type:mime}); const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download='overlay_fullpanel_center.webm'; document.body.appendChild(a); a.click(); a.remove();
+    await stopAndDownload(recCtx,'overlay_fullpanel_center.webm',{finalDelayMs:350});
     $('status').textContent='Скачан overlay_fullpanel_center.webm';
+    window.__CLIP_DONE__ = true;
   }catch(e){ console.error(e); $('status').textContent='Ошибка экспорта: '+e.message; }
-  finally{ running=false; $('exportBtn').disabled=false; }
+  finally{ if(window.__CLIP_DONE__ !== true) window.__CLIP_DONE__ = false; running=false; $('exportBtn').disabled=false; }
 }
 
 /* — Bindings — */
 $('previewBtn').addEventListener('click', preview);
 $('exportBtn').addEventListener('click', exportWebM);
 render(cfg(), buildState(cfg()));
+window.preview = preview;
+window.exportWebM = exportWebM;
 </script>
 </body>
 </html>
