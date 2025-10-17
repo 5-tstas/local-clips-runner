@@ -1,52 +1,17 @@
 {
-  "output": {
-    "size": [1280, 720],
-    "theme": "dark",
-    "bgColor": "#000000",
-    "textColor": "#FFFFFF",
-    "fontFamily": "Inter, Arial, sans-serif",
-    "safeArea": [48, 48, 48, 48]
-  },
+  "output": { "size": [1280, 720] },
   "jobs": [
-    {
-      "type": "overlay",
-      "name": "001_overlay_intro",
-      "durationSec": 12,
-      "payload": {
-        "title": "AgentKit + GPT-5",
-        "subtitle": "Smoke-тест генератора врезок",
-        "body": ["WebM 1280×720 @30fps", "Файлы должны грузиться в aistudios.com"],
-        "vCenter": true
-      }
-    },
-    {
-      "type": "chat",
-      "name": "002_chat_typing",
-      "durationSec": 15,
-      "payload": {
-        "lines": ["Подключаю AgentKit…", "Печатаю текст…", "Готово к экспорту!"],
-        "typingSpeed": 1.0,
-        "cursor": true
-      }
-    },
-    {
-      "type": "abc",
-      "name": "003_abc_demo",
-      "durationSec": 9,
+    { "type": "overlay", "name": "001_overlay_intro", "durationSec": 12,
+      "payload": { "title": "AgentKit + GPT-5", "subtitle": "Проверка загрузки в Aistudios" } },
+    { "type": "abc", "name": "002_abc_demo", "durationSec": 18,
       "payload": {
         "images": [
           "samples/1_AgentKit-ot-OpenAI.png",
           "samples/2_Prostaya-formulirovka-zadachi.png",
           "samples/3_Klyuchevye-preimushestva-AgentKit.png"
         ],
-        "captions": [
-          "AgentKit от OpenAI",
-          "Простая формулировка задачи",
-          "Ключевые преимущества"
-        ],
-        "perSlideSec": 3,
-        "transition": "fade"
-      }
-    }
+        "captions": ["AgentKit", "Формулировка", "Преимущества"],
+        "perSlideSec": 3, "transition": "fade"
+      } }
   ]
 }
