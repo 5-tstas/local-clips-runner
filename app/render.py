@@ -11,31 +11,26 @@ from models import Batch, Job, Output, validate_batch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HTML_DIR   = REPO_ROOT / "html"
 
-# КОРОТКИЕ имена html
+# КОРОТКИЕ имена html (как в архиве)
 HTML_BY_TYPE: Dict[str, str] = {
     "overlay": "overlay.html",
     "chat":    "chat-typing.html",
     "abc":     "abc-transist.html",
 }
 
-# ---------- утилиты ----------
+# ---------- пост-хук (как в архиве) ----------
 def _run_post_render_hook(out_dir: Path) -> None:
-    """
-    Пост-обработка всех .webm: ремультиплекс без перекодирования через ffmpeg.
-    OUT_DIR передаём через ENV. Если хук отсутствует — просто предупреждаем.
-    """
-    hook = Path(__file__).resolve().parents[1] / "scripts" / "post_render_fix_webm.sh"
+    hook = REPO_ROOT / "scripts" / "post_render_fix_webm.sh"
     if not hook.exists():
-        print(f"[post-hook][warn] hook not found: {hook}")
+        print(f"[post-hook][warn] not found: {hook}")
         return
-    env = os.environ.copy()
+    env = dict(os.environ)
     env["OUT_DIR"] = str(out_dir)
     try:
         subprocess.run(["bash", "-e", str(hook)], check=True, env=env)
         print("[post-hook] done")
     except subprocess.CalledProcessError as e:
         print(f"[post-hook][warn] failed: {e}")
-
 
 def _slug(s: str) -> str:
     s = (s or "").strip().lower()
@@ -72,27 +67,30 @@ async def _set_file(page, selector: str, path: Path) -> bool:
     return True
 
 async def _start_preview(page, job_type: str) -> None:
-    # автозапуск предпросмотра (для записи экрана)
-    launchers = {
-        "overlay": ["preview", "runPreview", "start", "play"],
-        "chat":    ["runPreview", "preview", "start", "play"],
-        "abc":     ["preview", "start", "play"],
-    }.get(job_type, ["preview","runPreview","start","play"])
-    await page.evaluate("""(names) => {
-      const S = (window.STATE||{});
-      for (const name of names) {
-        const fn = window[name];
-        if (typeof fn === 'function') {
-          try { fn(S); return true; } catch(_) {}
-          try { fn();  return true; } catch(_) {}
-      }}
-      const sels = ['#btnPreview','#preview','[data-action="preview"]','.preview','button'];
-      for (const sel of sels) { const el = document.querySelector(sel); if (el) { el.click(); return true; } }
-      return false;
-    }""", launchers)
+    # запуск предпросмотра: функция → кнопка → клавиша
+    for fn in ("runPreview", "startPreview", "preview"):
+        try:
+            ok = await page.evaluate(f"typeof window.{fn} === 'function'")
+            if ok:
+                await page.evaluate(f"window.{fn}()")
+                return
+        except Exception:
+            pass
+    for sel in ("#previewBtn", "#btnPreview", "button[data-action='preview']"):
+        try:
+            btn = await page.query_selector(sel)
+            if btn:
+                await btn.click()
+                return
+        except Exception:
+            pass
+    try:
+        await page.keyboard.press("Enter")
+    except Exception:
+        pass
 
 async def _try_export(page, prefer_funcs: List[str], btn_ids: List[str]) -> bool:
-    # Запуск экспорта (без предпросмотра)
+    # Попытка запустить экспорт внутри страницы: глобальные функции → кнопка
     code = f"""
 (() => {{
   const tryFns = {json.dumps(prefer_funcs)};
@@ -107,7 +105,7 @@ async def _try_export(page, prefer_funcs: List[str], btn_ids: List[str]) -> bool
     if (el) {{ el.click(); return true; }}
   }}
   return false;
-}})()
+}})();
 """
     try:
         return bool(await page.evaluate(code))
@@ -121,14 +119,14 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
     if not html_path.exists():
         raise FileNotFoundError(f"Не найден HTML: {html_path}")
 
-    # Слить глобальные стили (output) в payload (локальные перекрывают)
-    payload = job.payload.dict()
-    for k in ("bgColor","textColor","fontFamily","cpsPrompt","cpsAnswer","pauseSentence","pauseComma","fps","soundOn","thinkSec"):
+    # Слить настройки output в payload
+    payload = dict(job.payload or {})
+    for k in ("size", "theme", "bgColor", "textColor", "fontFamily", "safeArea"):
         v = getattr(output, k, None)
         if v is not None and k not in payload:
             payload[k] = v
 
-    # Передаём STATE как base64(JSON) и глушим автостарт (?autostart=0)
+    # Передаём STATE как ?data=base64(JSON) и глушим автозапуск (?autostart=0)
     b64 = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
     url = html_path.as_uri() + "?autostart=0&data=" + b64
 
@@ -138,28 +136,21 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
     tmp_videos.mkdir(exist_ok=True)
 
     async with async_playwright() as p:
-        # ВСЕГДА включаем запись как фолбэк
         browser = await p.chromium.launch()
         context = await browser.new_context(
             viewport={"width": w, "height": h},
             accept_downloads=True,
-            record_video_dir=str(tmp_videos),
+            record_video_dir=tmp_videos.as_posix(),            # фолбэк-запись страницы
             record_video_size={"width": w, "height": h},
         )
         page = await context.new_page()
         await page.goto(url)
+        await page.wait_for_load_state("networkidle")
 
-        # убрать «серый» старт — фон/цвет сразу
-        await page.evaluate("""(() => {
-          const S = (window.STATE||{});
-          if (S.bgColor)  document.body.style.background = S.bgColor;
-          if (S.textColor)document.body.style.color      = S.textColor;
-        })()""")
-
-        # дождёмся шрифтов (если есть)
+        # дождёмся загрузки шрифтов если есть
         try:
             await page.wait_for_function(
-                "() => (document.fonts ? document.fonts.ready.then(() => true) : true)",
+                "document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true",
                 timeout=5000
             )
         except PWTimeoutError:
@@ -175,7 +166,7 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             await _fill(page, "#subtitle", st)
             await _fill(page, "#body", body)
 
-            # 1) Попытка ЭКСПОРТА
+            # 1) Попытка ЭКСПОРТА (как в архиве)
             got = False
             try:
                 started = await _try_export(page, ["exportWebM"], ["#exportBtn","#btnExport","#export"])
@@ -207,37 +198,67 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             return out_dir / _outfile_name(idx, job)
 
         elif job.type == "chat":
-            # Заполняем поля, НО экспорт НЕ используем — только запись экрана (устраняем зависания)
+            # СНАЧАЛА пробуем экспорт из канваса (runExport), затем фолбэк на запись страницы.
             lines = payload.get("lines") or []
             md = "\n\n".join(lines) if isinstance(lines, list) else str(lines)
             await _fill(page, "#answer", md)
-            if payload.get("prompt"): await _fill(page, "#prompt", payload.get("prompt"))
+            if payload.get("prompt"):
+                await _fill(page, "#prompt", payload.get("prompt"))
 
             # скорости/паузы/FPS/звук
-            def _num(v, d): 
+            def _num(v, d):
                 try: return int(v) if v is not None else d
                 except: return d
-            cps_prompt = _num(payload.get("cpsPrompt"), 14)
-            cps_answer = _num(payload.get("cpsAnswer"), 20)
-            pause_sentence = _num(payload.get("pauseSentence"), 220)
-            pause_comma    = _num(payload.get("pauseComma"), 110)
-            fps            = _num(payload.get("fps"), 30)
-            think_sec      = _num(payload.get("thinkSec"), 2)
+            cps_prompt      = _num(payload.get("cpsPrompt"), 14)
+            cps_answer      = _num(payload.get("cpsAnswer"), 20)
+            pause_sentence  = _num(payload.get("pauseSentence"), 220)
+            pause_comma     = _num(payload.get("pauseComma"), 110)
+            fps             = _num(payload.get("fps"), 30)
+            think_sec       = _num(payload.get("thinkSec"), 2)
 
+            # КЛЮЧЕВОЕ: thinkSec в UI обычно не подхватывается из ?data= — проставим явно
             for sel, val in [
                 ("#cpsPrompt", str(cps_prompt)),
                 ("#cpsAnswer", str(cps_answer)),
                 ("#pauseSentence", str(pause_sentence)),
                 ("#pauseComma", str(pause_comma)),
                 ("#fps", str(fps)),
+                ("#thinkSec", str(think_sec)),
             ]:
-                await _fill(page, sel, val)
-            await _fill(page, "#soundOn", "")  # выкл звук в headless
+                try:
+                    await _fill(page, sel, val)
+                except Exception:
+                    pass
+            try:
+                await _fill(page, "#soundOn", "")  # без звука в headless
+            except Exception:
+                pass
 
-            # автопревью и запись до конца (или до оценки времени)
+            # 1) Первая попытка — экспорт WebM с канваса (chat-typing.html использует runExport)
+            got = False
+            try:
+                started = await _try_export(
+                    page,
+                    ["runExport"],
+                    ["#exportBtn","#btnExport","#export","button[data-action='export']"]
+                )
+                if started:
+                    async with page.expect_download(timeout=120000) as dl:
+                        pass
+                    download = await dl.value
+                    dst = out_dir / _outfile_name(idx, job)
+                    await download.save_as(dst.as_posix())
+                    got = True
+            except Exception:
+                got = False
+
+            if got:
+                await context.close(); await browser.close()
+                return out_dir / _outfile_name(idx, job)
+
+            # 2) Фолбэк — предпросмотр + запись страницы до конца
             await _start_preview(page, "chat")
 
-            # оценка длительности
             txt_prompt = payload.get("prompt") or ""
             text = (txt_prompt + "\n" + md)
             sent = len(re.findall(r"[.!?…]", text))
@@ -248,10 +269,9 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
                 + (len(md) * 1000) / max(1, cps_answer)
                 + sent * pause_sentence
                 + comm * pause_comma
-                + 1500  # хвост после печати
+                + 1500
             )
-            duration_ms = max(3000, min(est_ms, 120000))  # 3с..120с
-
+            duration_ms = max(3000, min(est_ms, 120000))
             try:
                 await page.wait_for_function("() => window.__CLIP_DONE__ === true", timeout=duration_ms + 2000)
             except PWTimeoutError:
@@ -303,6 +323,7 @@ async def render_job(idx: int, job: Job, output: Output, out_dir: Path) -> Path:
             await context.close(); await browser.close()
             return out_dir / _outfile_name(idx, job)
 
+# ---------- батч ----------
 async def render_batch(batch: Batch, out_dir: Path) -> Path:
     validate_batch(batch)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -312,7 +333,7 @@ async def render_batch(batch: Batch, out_dir: Path) -> Path:
         f = await render_job(i, job, batch.output, out_dir)
         outs.append(f)
 
-    # все клипы уже записаны в out_dir
+    # пост-хук (как в архиве)
     _run_post_render_hook(out_dir)
 
     zip_path = out_dir / "clips.zip"
@@ -320,6 +341,8 @@ async def render_batch(batch: Batch, out_dir: Path) -> Path:
         for f in outs:
             zf.write(f, arcname=f.name)
     return zip_path
+
+
 
 
 
