@@ -1,6 +1,6 @@
 # app/render.py
 from __future__ import annotations
-import base64, json, re
+import base64, json, os, re, subprocess
 from pathlib import Path
 from typing import Dict, List
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -19,6 +19,24 @@ HTML_BY_TYPE: Dict[str, str] = {
 }
 
 # ---------- утилиты ----------
+def _run_post_render_hook(out_dir: Path) -> None:
+    """
+    Пост-обработка всех .webm: ремультиплекс без перекодирования через ffmpeg.
+    OUT_DIR передаём через ENV. Если хук отсутствует — просто предупреждаем.
+    """
+    hook = Path(__file__).resolve().parents[1] / "scripts" / "post_render_fix_webm.sh"
+    if not hook.exists():
+        print(f"[post-hook][warn] hook not found: {hook}")
+        return
+    env = os.environ.copy()
+    env["OUT_DIR"] = str(out_dir)
+    try:
+        subprocess.run(["bash", "-e", str(hook)], check=True, env=env)
+        print("[post-hook] done")
+    except subprocess.CalledProcessError as e:
+        print(f"[post-hook][warn] failed: {e}")
+
+
 def _slug(s: str) -> str:
     s = (s or "").strip().lower()
     s = re.sub(r"[^a-z0-9]+", "-", s)
@@ -293,6 +311,9 @@ async def render_batch(batch: Batch, out_dir: Path) -> Path:
     for i, job in enumerate(batch.jobs, start=1):
         f = await render_job(i, job, batch.output, out_dir)
         outs.append(f)
+
+    # все клипы уже записаны в out_dir
+    _run_post_render_hook(out_dir)
 
     zip_path = out_dir / "clips.zip"
     with ZipFile(zip_path, "w", ZIP_DEFLATED) as zf:
